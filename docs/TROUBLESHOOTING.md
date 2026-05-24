@@ -134,15 +134,19 @@ El repo `followerBot-deploy` es público — no debería pedir auth. Si lo pide,
 
 ## Errores del bot al arrancar (s6)
 
-### `ModuleNotFoundError: No module named 'config'` (o similar)
+### `ModuleNotFoundError` para módulos locales del bot (`config`, `engine`, etc.)
 
-El bot tiene módulos locales (`config.py`, `engine.py`, etc.) que importa desde su propio directorio. Al ejecutar `wine python.exe main.py`, Wine no inyecta el directorio del script al `sys.path` como hace Linux nativo.
+Python embeddable bajo Wine ignora `PYTHONPATH` (define `sys.path` desde `python311._pth`). El bot debe garantizar que su propio directorio esté en `sys.path`.
 
-Solución: el `s6/followerbot/run` exporta `PYTHONPATH='Z:\config\mi_trading_bot'` antes de invocar Wine. Si añades nuevos módulos o subdirectorios al bot, asegúrate de que las rutas relativas siguen funcionando con este PYTHONPATH. Si necesitas más paths, sepáralos con `;` (separador Windows):
+Esto se resuelve **dentro del bot** (no en el deploy) al principio de `main.py`:
 
-```bash
-PYTHONPATH='Z:\config\mi_trading_bot;Z:\config\mi_trading_bot\channels'
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 ```
+
+Es el patrón estándar de Python para scripts con módulos hermanos. Si añades nuevos archivos al bot que necesiten ser importables como módulos, asegúrate de que están en el mismo directorio que `main.py` o que su path está en `sys.path`.
 
 ### El bot crashea en bucle con `MT5 initialize failed` durante el primer arranque
 

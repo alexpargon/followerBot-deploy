@@ -33,16 +33,13 @@ fi
 # Margen adicional para que el terminal MT5 termine de arrancar (proceso Wine)
 sleep 15
 
-echo "[s6] Lanzando followerBot con Python 3.11 embeddable (PYTHONPATH=$CODE_DIR)"
+echo "[s6] Lanzando followerBot con Python 3.11 embeddable"
 
 cd "$CODE_DIR"
 
-# Bajo Wine, sys.path[0] no se autoinyecta como en Linux nativo.
-# Forzamos PYTHONPATH a la ruta Wine ('Z:' es el drive virtual a /).
 exec s6-setuidgid abc \
     env \
         XDG_RUNTIME_DIR=/tmp/runtime-abc \
         HOME=/config \
         WINEDEBUG=-all \
-        PYTHONPATH='Z:\config\mi_trading_bot' \
     wine "$PY_WIN" main.py
