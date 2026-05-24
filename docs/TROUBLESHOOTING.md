@@ -18,6 +18,14 @@ Estás ejecutando comandos como `root` dentro del contenedor pero Wine espera al
 docker exec -u abc followerbot bash -c "..."
 ```
 
+### `XDG_RUNTIME_DIR is invalid or not set in the environment` durante `docker build`
+
+Esto pasa cuando se invoca Wine en un `RUN` sin haber exportado `XDG_RUNTIME_DIR`. El `Dockerfile` actual lo soluciona definiendo la variable a nivel `ENV` y creando el directorio antes del primer `wineboot`. Si reaparece tras una actualización de la imagen base, revisa que el bloque "Entorno requerido por Wine" del Dockerfile esté presente y antes de cualquier `RUN wine ...`.
+
+### El build de Python termina pero el siguiente paso no encuentra el ejecutable
+
+Probablemente el instalador colocó Python en una ruta distinta de la esperada (32-bit vs 64-bit). El Dockerfile detecta automáticamente ambas rutas y falla con un mensaje claro listando el contenido de `Program Files` si no encuentra ninguna. Mira la salida del paso 6 del build para diagnosticar.
+
 ## El bot Python falla al arrancar
 
 ### `PermissionError: '.env'`

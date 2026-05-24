@@ -2,14 +2,32 @@
 # Servicio s6: lanza followerBot y se queda en foreground (s6 supervisa).
 set -e
 
+mkdir -p /tmp/runtime-abc && chmod 700 /tmp/runtime-abc
+
 cd "${BOT_CODE_DIR:-/config/mi_trading_bot}"
 
 # Esperar a que el wineprefix esté listo y MT5 arrancado
 sleep 10
 
-# Asegurar permisos del directorio de datos (por si el volumen viene de host con UID diferente)
+# Asegurar permisos del directorio de datos
 chown -R abc:abc "${BOT_DATA_DIR:-/config/bot-data}" 2>/dev/null || true
 
-# Lanzar como abc, en foreground (s6 supervisa este proceso)
+# Resolver ruta de Python (32 vs 64 bit dependiendo del build)
+PY_64='/config/.wine/drive_c/Program Files/Python311/python.exe'
+PY_32='/config/.wine/drive_c/Program Files (x86)/Python311/python.exe'
+
+if [ -f "$PY_64" ]; then
+    PY_WIN='C:\Program Files\Python311\python.exe'
+elif [ -f "$PY_32" ]; then
+    PY_WIN='C:\Program Files (x86)\Python311\python.exe'
+else
+    echo "[s6] ERROR: Python 3.11 no encontrado en ninguna ruta esperada"
+    exit 1
+fi
+
+echo "[s6] Lanzando bot con Python: $PY_WIN"
+
+# Lanzar como abc en foreground (s6 supervisa este proceso)
 exec s6-setuidgid abc \
-    wine "${BOT_PYTHON:-C:\\Program Files\\Python311\\python.exe}" main.py
+    env XDG_RUNTIME_DIR=/tmp/runtime-abc HOME=/config WINEDEBUG=-all \
+    wine "$PY_WIN" main.py
