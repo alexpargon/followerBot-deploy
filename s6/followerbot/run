@@ -1,21 +1,48 @@
 #!/usr/bin/with-contenv bash
-# Servicio s6: lanza followerBot y se queda en foreground.
+# Servicio s6: lanza followerBot y se queda en foreground (s6 supervisa).
 set -e
 
-cd "${BOT_CODE_DIR:-/config/mi_trading_bot}"
+CODE_DIR="${BOT_CODE_DIR:-/config/mi_trading_bot}"
+DATA_DIR="${BOT_DATA_DIR:-/config/bot-data}"
+PY_WIN="${BOT_PYTHON:-C:\\Python311\\python.exe}"
 
-# Asegurar directorios runtime necesarios para Wine
+# Asegurar directorios runtime para Wine
 mkdir -p /tmp/runtime-abc
 chmod 700 /tmp/runtime-abc
 
-# Esperar a que MT5 y el wineprefix estén listos
-sleep 10
+# Asegurar permisos del directorio de datos (idempotente)
+chown -R abc:abc "$DATA_DIR" 2>/dev/null || true
 
-# Asegurar permisos del directorio de datos
-chown -R abc:abc "${BOT_DATA_DIR:-/config/bot-data}" 2>/dev/null || true
+# Esperar a que MT5 esté instalado y a que el script init de la imagen base haya terminado.
+# La imagen base hace setup en el primer arranque: descargar Mono, instalar MT5, etc.
+# Esto puede tardar 1-3 minutos. En arranques posteriores es instantáneo.
+MT5_EXE="/config/.wine/drive_c/Program Files/MetaTrader 5/terminal64.exe"
+MAX_WAIT=300   # 5 minutos máximo
+WAITED=0
+while [ ! -f "$MT5_EXE" ] && [ "$WAITED" -lt "$MAX_WAIT" ]; do
+    echo "[s6] Esperando a que MT5 termine de instalarse (${WAITED}s/${MAX_WAIT}s)..."
+    sleep 5
+    WAITED=$((WAITED + 5))
+done
 
-echo "[s6] Lanzando followerBot con Python 3.11 embeddable"
+if [ ! -f "$MT5_EXE" ]; then
+    echo "[s6] ERROR: MT5 no se instaló tras ${MAX_WAIT}s. Saliendo."
+    exit 1
+fi
 
+# Margen adicional para que el terminal MT5 termine de arrancar (proceso Wine)
+sleep 15
+
+echo "[s6] Lanzando followerBot con Python 3.11 embeddable (PYTHONPATH=$CODE_DIR)"
+
+cd "$CODE_DIR"
+
+# Bajo Wine, sys.path[0] no se autoinyecta como en Linux nativo.
+# Forzamos PYTHONPATH a la ruta Wine ('Z:' es el drive virtual a /).
 exec s6-setuidgid abc \
-    env XDG_RUNTIME_DIR=/tmp/runtime-abc HOME=/config WINEDEBUG=-all \
-    wine "${BOT_PYTHON:-C:\\Python311\\python.exe}" main.py
+    env \
+        XDG_RUNTIME_DIR=/tmp/runtime-abc \
+        HOME=/config \
+        WINEDEBUG=-all \
+        PYTHONPATH='Z:\config\mi_trading_bot' \
+    wine "$PY_WIN" main.py

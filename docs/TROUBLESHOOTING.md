@@ -131,3 +131,25 @@ Si necesitas el código del bot fuera del LXC del bot:
 ### `Authentication failed` al clonar followerBot-deploy
 
 El repo `followerBot-deploy` es público — no debería pedir auth. Si lo pide, verifica que la URL es correcta: `https://github.com/alexpargon/followerBot-deploy.git`.
+
+## Errores del bot al arrancar (s6)
+
+### `ModuleNotFoundError: No module named 'config'` (o similar)
+
+El bot tiene módulos locales (`config.py`, `engine.py`, etc.) que importa desde su propio directorio. Al ejecutar `wine python.exe main.py`, Wine no inyecta el directorio del script al `sys.path` como hace Linux nativo.
+
+Solución: el `s6/followerbot/run` exporta `PYTHONPATH='Z:\config\mi_trading_bot'` antes de invocar Wine. Si añades nuevos módulos o subdirectorios al bot, asegúrate de que las rutas relativas siguen funcionando con este PYTHONPATH. Si necesitas más paths, sepáralos con `;` (separador Windows):
+
+```bash
+PYTHONPATH='Z:\config\mi_trading_bot;Z:\config\mi_trading_bot\channels'
+```
+
+### El bot crashea en bucle con `MT5 initialize failed` durante el primer arranque
+
+En el primer arranque del contenedor (volumen `/config` recién creado o LXC nuevo), la imagen base instala MT5 desde cero. Puede tardar 1-3 minutos. El `s6/followerbot/run` espera hasta 5 minutos a que aparezca `terminal64.exe` antes de lanzar el bot.
+
+Si pasados 5 minutos sigue sin estar instalado, el servicio falla con mensaje claro. Mira los logs del contenedor para ver el progreso del init de la imagen base (descarga de Mono, etc.):
+
+```bash
+docker logs followerbot | grep -E '\[\d/7\]'
+```
