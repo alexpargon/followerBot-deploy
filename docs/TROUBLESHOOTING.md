@@ -40,6 +40,19 @@ El Dockerfile lo esquiva: comprueba si necesita usar `apt` (solo si falta `unzip
 
 ## El bot Python falla al arrancar
 
+### `ImportError: numpy.core.multiarray failed to import` / `_ARRAY_API not found`
+
+MetaTrader5 sigue publicando wheels compilados contra NumPy 1.x (a la fecha de la última actualización de este repo). `requirements.lock.txt` fija `numpy==1.26.4` por esta razón.
+
+**No actualices NumPy a 2.x sin antes verificar** que MetaQuotes ha publicado wheels compatibles. Para comprobarlo:
+
+```bash
+pip index versions MetaTrader5
+# Mira el changelog del paquete en PyPI antes de subir numpy.
+```
+
+Si MetaQuotes actualiza, también edita `requirements.txt` del repo `followerBot` (que actualmente fija `numpy<2`).
+
 ### `PermissionError: '.env'`
 
 Permisos: `chown 911:911 /opt/bot-config/.env && chmod 640 /opt/bot-config/.env`.

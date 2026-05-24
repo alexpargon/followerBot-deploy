@@ -1,4 +1,4 @@
 MetaTrader5==5.0.45
 Telethon==1.36.0
 python-dotenv==1.0.1
-numpy==2.0.2
+numpy==1.26.4
