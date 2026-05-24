@@ -22,9 +22,15 @@ docker exec -u abc followerbot bash -c "..."
 
 Esto pasa cuando se invoca Wine en un `RUN` sin haber exportado `XDG_RUNTIME_DIR`. El `Dockerfile` actual lo soluciona definiendo la variable a nivel `ENV` y creando el directorio antes del primer `wineboot`. Si reaparece tras una actualización de la imagen base, revisa que el bloque "Entorno requerido por Wine" del Dockerfile esté presente y antes de cualquier `RUN wine ...`.
 
-### El build de Python termina pero el siguiente paso no encuentra el ejecutable
+### El build falla en la verificación de Python (`Python no se instaló en ninguna ruta esperada`)
 
-Probablemente el instalador colocó Python en una ruta distinta de la esperada (32-bit vs 64-bit). El Dockerfile detecta automáticamente ambas rutas y falla con un mensaje claro listando el contenido de `Program Files` si no encuentra ninguna. Mira la salida del paso 6 del build para diagnosticar.
+Esto pasaba con la versión 2.0.1 del Dockerfile, que usaba el instalador `.exe` de Python con `/quiet`. Bajo Wine en builds Docker no interactivos, ese instalador muere en silencio sin instalar nada.
+
+La versión 2.0.2+ del Dockerfile usa el **Python embeddable** (un zip auto-contenido) en vez del instalador. Si actualizas tu rama desde una versión anterior, asegúrate de hacer `git pull` antes de rebuilds.
+
+### `unzip: command not found` durante el build
+
+La imagen base normalmente trae `unzip`, pero si una actualización lo quitase, el Dockerfile lo reinstala automáticamente con `apt-get`. Si tu build falla aquí, verifica conectividad a `deb.debian.org` desde dentro del LXC donde construyes.
 
 ## El bot Python falla al arrancar
 

@@ -2,28 +2,28 @@
 FROM gmag11/metatrader5_vnc:latest
 
 LABEL maintainer="alexpargon"
-LABEL description="MT5 + Python 3.11 + followerBot dependencies (Wine)"
-LABEL version="2.0.1"
+LABEL description="MT5 + Python 3.11 (embeddable) + followerBot dependencies (Wine)"
+LABEL version="2.0.2"
 
 # ---------------------------------------------------------------------------
-# 1. Descargar instalador de Python 3.11 (operación como root, sin Wine)
+# 1. Descargar Python 3.11 embeddable (zip, no instalador)
+#    El embeddable es un Python self-contained sin instalador.
+#    Usamos amd64 para máxima compatibilidad con MetaTrader5 actual.
 # ---------------------------------------------------------------------------
 USER root
 ARG PYTHON_VERSION=3.11.9
-ARG PYTHON_INSTALLER=python-${PYTHON_VERSION}-amd64.exe
+ARG PYTHON_EMBED_ZIP=python-${PYTHON_VERSION}-embed-amd64.zip
 
-RUN curl -fsSL "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_INSTALLER}" \
-        -o /tmp/${PYTHON_INSTALLER} \
- && chmod +x /tmp/${PYTHON_INSTALLER}
+RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_EMBED_ZIP}" \
+        -o /tmp/${PYTHON_EMBED_ZIP}
 
 # ---------------------------------------------------------------------------
-# 2. Preparar directorio /config (montable como volumen en runtime)
+# 2. Preparar /config y entorno de Wine
 # ---------------------------------------------------------------------------
 RUN mkdir -p /config && chown -R abc:abc /config
 
-# ---------------------------------------------------------------------------
-# 3. Entorno requerido por Wine en builds no interactivos
-# ---------------------------------------------------------------------------
 USER abc
 ENV HOME=/config \
     WINEDEBUG=-all \
@@ -34,72 +34,80 @@ ENV HOME=/config \
 RUN mkdir -p /tmp/runtime-abc && chmod 700 /tmp/runtime-abc
 
 # ---------------------------------------------------------------------------
-# 4. Inicializar wineprefix de forma controlada
+# 3. Inicializar wineprefix
 # ---------------------------------------------------------------------------
 RUN wineboot --init && wineserver -w
 
 # ---------------------------------------------------------------------------
-# 5. Instalar Python 3.11 dentro del wineprefix
-#     - Se usa ';' en vez de '&&' porque el instalador /quiet puede devolver
-#       códigos de salida distintos de 0 aún habiendo instalado correctamente.
-#     - La verificación posterior con --version es la prueba real de éxito.
+# 4. Extraer Python embeddable en C:\Python311 (dentro del wineprefix)
+#    La ruta real en el filesystem Linux es /config/.wine/drive_c/Python311
 # ---------------------------------------------------------------------------
-RUN wine /tmp/${PYTHON_INSTALLER} /quiet InstallAllUsers=1 PrependPath=1 Include_test=0 \
-    ; sleep 5 \
+USER root
+RUN mkdir -p /config/.wine/drive_c/Python311 \
+ && unzip -q /tmp/${PYTHON_EMBED_ZIP} -d /config/.wine/drive_c/Python311 \
+ && rm /tmp/${PYTHON_EMBED_ZIP} \
+ && chown -R abc:abc /config/.wine/drive_c/Python311
+
+# ---------------------------------------------------------------------------
+# 5. Habilitar 'site' module (necesario para pip)
+#    El embeddable viene con 'import site' comentado en python311._pth.
+#    Lo activamos para que pip y nuestras librerías funcionen.
+# ---------------------------------------------------------------------------
+USER abc
+RUN sed -i 's|^#import site|import site|' /config/.wine/drive_c/Python311/python311._pth
+
+# ---------------------------------------------------------------------------
+# 6. Instalar pip dentro del Python embeddable
+#    Descargamos get-pip.py oficial y lo ejecutamos con el python.exe de Wine.
+# ---------------------------------------------------------------------------
+USER root
+RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
+ && chown abc:abc /tmp/get-pip.py
+
+USER abc
+RUN wine "C:\\Python311\\python.exe" /tmp/get-pip.py --no-warn-script-location \
+    ; sleep 3 \
     ; wineserver -w \
-    ; rm -f /tmp/${PYTHON_INSTALLER} \
+    ; rm -f /tmp/get-pip.py \
     ; true
 
 # ---------------------------------------------------------------------------
-# 6. Verificar instalación de Python (intentando ambas rutas)
-#     - Si el instalador es 64-bit, queda en Program Files
-#     - Si el wineprefix es 32-bit, queda en Program Files (x86)
-#     - Falla el build aquí si ninguna ruta tiene Python funcional
+# 7. Verificar que python y pip funcionan
 # ---------------------------------------------------------------------------
-RUN if wine "C:\\Program Files\\Python311\\python.exe" --version 2>/dev/null; then \
-        echo "Python 64-bit OK" ; \
-    elif wine "C:\\Program Files (x86)\\Python311\\python.exe" --version 2>/dev/null; then \
-        echo "Python 32-bit OK" ; \
-    else \
-        echo "ERROR: Python no se instaló en ninguna ruta esperada" ; \
-        ls -la "/config/.wine/drive_c/Program Files/" 2>/dev/null || true ; \
-        ls -la "/config/.wine/drive_c/Program Files (x86)/" 2>/dev/null || true ; \
-        exit 1 ; \
-    fi
+RUN wine "C:\\Python311\\python.exe" --version \
+ && wine "C:\\Python311\\python.exe" -m pip --version
 
 # ---------------------------------------------------------------------------
-# 7. Instalar dependencias del bot
-#     - El archivo requirements.lock.txt está en la raíz del contexto de build
+# 8. Instalar dependencias del bot
 # ---------------------------------------------------------------------------
 COPY --chown=abc:abc requirements.lock.txt /tmp/requirements.lock.txt
 
-RUN if [ -f "/config/.wine/drive_c/Program Files/Python311/python.exe" ]; then \
-        PY="C:\\Program Files\\Python311\\python.exe" ; \
-    else \
-        PY="C:\\Program Files (x86)\\Python311\\python.exe" ; \
-    fi \
- && wine "$PY" -m pip install --upgrade pip \
- && wine "$PY" -m pip install -r /tmp/requirements.lock.txt \
+RUN wine "C:\\Python311\\python.exe" -m pip install --upgrade pip \
+ && wine "C:\\Python311\\python.exe" -m pip install -r /tmp/requirements.lock.txt \
  && wineserver -w \
  && rm /tmp/requirements.lock.txt
 
 # ---------------------------------------------------------------------------
-# 8. Servicio s6 que supervisa main.py
+# 9. Verificar que los imports críticos funcionan
+# ---------------------------------------------------------------------------
+RUN wine "C:\\Python311\\python.exe" -c "import MetaTrader5, telethon, dotenv, numpy; print('Imports OK:', MetaTrader5.__version__, telethon.__version__, numpy.__version__)"
+
+# ---------------------------------------------------------------------------
+# 10. Servicio s6
 # ---------------------------------------------------------------------------
 USER root
 COPY s6/followerbot /etc/services.d/followerbot
 RUN chmod +x /etc/services.d/followerbot/run /etc/services.d/followerbot/finish
 
 # ---------------------------------------------------------------------------
-# 9. Variables de entorno del bot
-#     - BOT_PYTHON apunta a la ruta del Python instalado. Se resuelve
-#       dinámicamente en el s6 run script para soportar 32 y 64 bit.
+# 11. Variables de entorno del bot
 # ---------------------------------------------------------------------------
 ENV BOT_DATA_DIR=/config/bot-data \
-    BOT_CODE_DIR=/config/mi_trading_bot
+    BOT_CODE_DIR=/config/mi_trading_bot \
+    BOT_PYTHON='C:\Python311\python.exe'
 
 # ---------------------------------------------------------------------------
-# 10. Directorio persistente del estado del bot
+# 12. Directorio de estado
 # ---------------------------------------------------------------------------
 RUN mkdir -p /config/bot-data && chown -R abc:abc /config/bot-data
 
