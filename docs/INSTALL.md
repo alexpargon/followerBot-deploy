@@ -9,6 +9,15 @@ Guía paso a paso para desplegar el bot desde cero en Proxmox VE.
 - Credenciales MT5 + API de Telegram (api_id, api_hash).
 - Móvil a mano para el código SMS de Telegram (solo primera vez).
 
+## Arquitectura de volúmenes
+
+### Volúmenes persistidos en el host
+
+- `/opt/mi_trading_bot` → código del bot (clonado de github.com/alexpargon/followerBot, gestionado por el watcher git).
+- `/opt/bot-config` → estado del bot (.env, sesión de Telegram, trades.db, logs).
+
+> El wineprefix con Python 3.11 y las librerías del bot vive **dentro de la imagen Docker**, no se persiste en volumen del host. Al recrear el contenedor con una nueva imagen, hay que volver a hacer login manual en MT5 vía VNC. Esto es la operación normal de upgrade.
+
 ## Paso 1 — Crear el LXC del Docker Registry (una sola vez)
 
 En la shell de Proxmox VE:

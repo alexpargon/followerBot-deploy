@@ -13,7 +13,6 @@ set -euo pipefail
 REPO_SSH="${REPO_SSH:-git@github.com:alexpargon/followerBot.git}"
 BRANCH="${BRANCH:-master}"
 APP_DIR="${APP_DIR:-/opt/mi_trading_bot}"
-MT5_DATA_DIR="${MT5_DATA_DIR:-/opt/mt5_data}"
 BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
 CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
 VNC_PORT="${VNC_PORT:-3000}"
@@ -42,7 +41,7 @@ apt-get update -qq
 apt-get install -y -qq git cron openssh-client ca-certificates curl >/dev/null
 
 # 2. Directorios
-mkdir -p "$APP_DIR" "$MT5_DATA_DIR" "$BOT_CONFIG_DIR"
+mkdir -p "$APP_DIR" "$BOT_CONFIG_DIR"
 chown -R 911:911 "$BOT_CONFIG_DIR"
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
@@ -107,7 +106,6 @@ set -uo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_DIR="$APP_DIR"
-MT5_DATA_DIR="$MT5_DATA_DIR"
 BOT_CONFIG_DIR="$BOT_CONFIG_DIR"
 CONTAINER_NAME="$CONTAINER_NAME"
 IMAGE="$FULL_IMAGE"
@@ -127,7 +125,6 @@ run_container() {
         --name "\$CONTAINER_NAME" \\
         --restart unless-stopped \\
         -p "\${VNC_PORT}:3000" \\
-        -v "\$MT5_DATA_DIR:/config" \\
         -v "\$APP_DIR:/config/mi_trading_bot" \\
         -v "\$BOT_CONFIG_DIR:/config/bot-data" \\
         "\$IMAGE"

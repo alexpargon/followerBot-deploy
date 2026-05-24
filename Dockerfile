@@ -122,4 +122,5 @@ ENV BOT_DATA_DIR=/config/bot-data \
 # ---------------------------------------------------------------------------
 RUN mkdir -p /config/bot-data && chown -R abc:abc /config/bot-data
 
-USER abc
+# s6-overlay arranca como root y baja privilegios él mismo.
+USER root

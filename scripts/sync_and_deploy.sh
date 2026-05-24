@@ -4,7 +4,6 @@ set -uo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_DIR="${APP_DIR:-/opt/mi_trading_bot}"
-MT5_DATA_DIR="${MT5_DATA_DIR:-/opt/mt5_data}"
 BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
 CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
 IMAGE="${IMAGE:-localhost:5000/followerbot:latest}"
@@ -24,7 +23,6 @@ run_container() {
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
         -p "${VNC_PORT}:3000" \
-        -v "$MT5_DATA_DIR:/config" \
         -v "$APP_DIR:/config/mi_trading_bot" \
         -v "$BOT_CONFIG_DIR:/config/bot-data" \
         "$IMAGE"

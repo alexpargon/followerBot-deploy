@@ -38,6 +38,23 @@ La imagen base `gmag11/metatrader5_vnc` configura un repo APT de WineHQ cuya cla
 
 El Dockerfile lo esquiva: comprueba si necesita usar `apt` (solo si falta `unzip`), y en ese caso mueve temporalmente el repo winehq fuera, hace el `apt`, y lo restaura. Si añades pasos nuevos al Dockerfile que requieran `apt`, aplica el mismo patrón.
 
+### El contenedor arranca pero s6 muere con `Permission denied` en `/docker-mods` o `lsiown`
+
+La imagen base de linuxserver.io requiere arrancar como `root` para que sus scripts de init configuren el usuario `abc` correctamente. El Dockerfile termina con `USER root` por ese motivo (la imagen baja privilegios internamente vía `s6-setuidgid`).
+
+Si reaparece este error tras una modificación del Dockerfile, comprueba que la última línea es `USER root`.
+
+### El contenedor arranca pero `/config` está vacío dentro del contenedor (sin wineprefix, sin Python)
+
+Esto pasaba en versiones tempranas de `setup-lxc.sh` que montaban `/opt/mt5_data:/config`. Ese mount **enmascara** el `/config` de la imagen (que contiene wineprefix, Python 3.11 y librerías) con un directorio vacío del host.
+
+Solución: NO montar nada sobre `/config` entero. El wineprefix forma parte de la imagen. Si necesitas persistir estado del bot, monta `/opt/bot-config:/config/bot-data` (subdirectorio específico). Si necesitas persistir config interna de MT5 (servidores conocidos, terminal.ini), monta sólo el subdirectorio relevante:
+```
+-v /opt/mt5_terminal:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes
+```
+
+Pero **nunca** sobre `/config` entero.
+
 ## El bot Python falla al arrancar
 
 ### `ImportError: numpy.core.multiarray failed to import` / `_ARRAY_API not found`
