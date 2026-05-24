@@ -1,0 +1,180 @@
+#!/bin/bash
+# bot-cli — operaciones comunes sobre followerBot
+# Uso: bot-cli <comando> [args]
+
+set -uo pipefail
+
+CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
+APP_DIR="${APP_DIR:-/opt/mi_trading_bot}"
+BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
+
+usage() {
+    cat <<EOF
+bot-cli — operaciones comunes sobre followerBot
+
+Uso: bot-cli <comando>
+
+Comandos:
+  status              Estado del contenedor, último commit, archivos clave
+  logs                Logs del contenedor (docker logs -f)
+  bot-logs            Logs del bot Python (tail -f bot.log)
+  restart             Reinicia el contenedor (no rebuild)
+  pull-and-restart    git pull + restart (fuerza actualización)
+  telegram-login      Login interactivo de Telethon (primera vez)
+  mt5-shell           Lanza una shell Python interactiva con MT5 disponible
+  vnc                 Imprime URL de VNC y la abre si hay xdg-open
+  env-edit            Edita /opt/bot-config/.env
+  env-show            Muestra .env (enmascara passwords)
+  rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
+  shell               Shell bash dentro del contenedor como abc
+  rootshell           Shell bash dentro del contenedor como root
+  help                Esta ayuda
+
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    status)
+        echo "=== Container ==="
+        docker ps --filter "name=^${CONTAINER_NAME}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+        echo
+        echo "=== Repo (último commit) ==="
+        cd "$APP_DIR" 2>/dev/null && git log -1 --oneline 2>/dev/null || echo "Repo no clonado"
+        echo
+        echo "=== Estado del bot ==="
+        if [ -f "$BOT_CONFIG_DIR/.env" ]; then
+            echo ".env: presente ($(stat -c '%U:%G %a' "$BOT_CONFIG_DIR/.env"))"
+        else
+            echo ".env: FALTA"
+        fi
+        if [ -f "$BOT_CONFIG_DIR/session.session" ]; then
+            echo "session.session: presente"
+        else
+            echo "session.session: FALTA (ejecuta bot-cli telegram-login)"
+        fi
+        if [ -f "$BOT_CONFIG_DIR/trades.db" ]; then
+            echo "trades.db: presente"
+        else
+            echo "trades.db: aún no creado (normal en primer arranque)"
+        fi
+        ;;
+
+    logs)
+        exec docker logs -f --tail 50 "$CONTAINER_NAME"
+        ;;
+
+    bot-logs)
+        exec tail -f "$BOT_CONFIG_DIR/bot.log"
+        ;;
+
+    restart)
+        echo "[*] Reiniciando $CONTAINER_NAME..."
+        docker restart "$CONTAINER_NAME"
+        echo "[OK] Sigue logs con: bot-cli logs"
+        ;;
+
+    pull-and-restart)
+        cd "$APP_DIR"
+        git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
+        git pull --ff-only || { echo "[!] git pull falló"; exit 1; }
+        chown -R 911:911 "$APP_DIR"
+        docker restart "$CONTAINER_NAME"
+        echo "[OK] Pull + restart hecho. Logs: bot-cli logs"
+        ;;
+
+    telegram-login)
+        echo "[*] Parando servicio s6 del bot..."
+        docker exec "$CONTAINER_NAME" s6-svc -d /run/service/followerbot 2>/dev/null || true
+        sleep 3
+        echo "[*] Lanzando main.py interactivamente para autenticar Telegram."
+        echo "    Te pedirá: phone (formato +34xxxxxxxxx) → code (llega por Telegram) → password 2FA si la tienes."
+        echo "    Cuando veas 'Listening to N channels' y 'Poll loop started', pulsa Ctrl+C."
+        echo
+        docker exec -it -u abc -w /config/mi_trading_bot \
+            -e XDG_RUNTIME_DIR=/tmp/runtime-abc \
+            -e HOME=/config \
+            -e WINEDEBUG=-all \
+            -e BOT_DATA_DIR=/config/bot-data \
+            "$CONTAINER_NAME" \
+            wine 'C:\Python311\python.exe' main.py
+        echo
+        echo "[*] Reactivando servicio s6..."
+        chown -R 911:911 "$BOT_CONFIG_DIR"
+        docker exec "$CONTAINER_NAME" s6-svc -u /run/service/followerbot
+        echo "[OK] Login de Telegram completo. El bot debe estar arrancando solo."
+        echo "    Comprueba con: bot-cli logs"
+        ;;
+
+    mt5-shell)
+        docker exec -it -u abc -w /config/mi_trading_bot \
+            -e XDG_RUNTIME_DIR=/tmp/runtime-abc \
+            -e HOME=/config \
+            -e WINEDEBUG=-all \
+            -e BOT_DATA_DIR=/config/bot-data \
+            "$CONTAINER_NAME" \
+            wine 'C:\Python311\python.exe'
+        ;;
+
+    vnc)
+        IP=$(hostname -I | awk '{print $1}')
+        URL="http://${IP}:3000"
+        echo "VNC: $URL"
+        if command -v xdg-open >/dev/null; then
+            xdg-open "$URL" 2>/dev/null &
+        fi
+        ;;
+
+    env-edit)
+        ${EDITOR:-nano} "$BOT_CONFIG_DIR/.env"
+        chown 911:911 "$BOT_CONFIG_DIR/.env"
+        chmod 640 "$BOT_CONFIG_DIR/.env"
+        echo "[*] Para aplicar cambios: bot-cli restart"
+        ;;
+
+    env-show)
+        if [ -f "$BOT_CONFIG_DIR/.env" ]; then
+            # Enmascara líneas con PASSWORD, HASH, TOKEN, API_ID o cualquier valor sensible
+            sed -E 's/(PASSWORD|HASH|TOKEN|API_ID|API_HASH)=.*/\1=***MASKED***/' "$BOT_CONFIG_DIR/.env"
+        else
+            echo "$BOT_CONFIG_DIR/.env no existe."
+            exit 1
+        fi
+        ;;
+
+    rebuild-image)
+        echo "[*] Pull de imagen actualizada..."
+        IMAGE=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null)
+        if [ -z "$IMAGE" ]; then
+            echo "[!] No se puede determinar imagen del contenedor."
+            exit 1
+        fi
+        docker pull "$IMAGE"
+        echo "[*] Reiniciando con imagen nueva..."
+        /usr/local/bin/sync_and_deploy.sh
+        echo "[OK] Imagen actualizada y contenedor reiniciado."
+        ;;
+
+    shell)
+        docker exec -it -u abc -w /config/mi_trading_bot \
+            -e XDG_RUNTIME_DIR=/tmp/runtime-abc \
+            -e HOME=/config \
+            "$CONTAINER_NAME" bash
+        ;;
+
+    rootshell)
+        docker exec -it "$CONTAINER_NAME" bash
+        ;;
+
+    help|--help|-h)
+        usage
+        ;;
+
+    *)
+        echo "Comando desconocido: $cmd"
+        usage
+        exit 1
+        ;;
+esac

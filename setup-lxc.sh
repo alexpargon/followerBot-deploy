@@ -40,6 +40,12 @@ echo "[*] Instalando utilidades base..."
 apt-get update -qq
 apt-get install -y -qq git cron openssh-client ca-certificates curl >/dev/null
 
+# Permitir a root operar sobre repos cuyos archivos pertenecen a abc (UID 911).
+# Necesario porque el watcher git corre como root y opera sobre /opt/mi_trading_bot
+# que es propiedad de 911:911.
+git config --global --add safe.directory '*' 2>/dev/null || true
+git config --system --add safe.directory '*' 2>/dev/null || true
+
 # 2. Directorios
 mkdir -p "$APP_DIR" "$BOT_CONFIG_DIR"
 chown -R 911:911 "$BOT_CONFIG_DIR"
@@ -87,9 +93,16 @@ if [ -n "$REGISTRY" ]; then
     mv /etc/docker/daemon.json.tmp /etc/docker/daemon.json
     systemctl restart docker
     sleep 3
-    echo "[*] Haz 'docker login $REGISTRY' manualmente si aún no lo hiciste."
     echo "[*] Pulleando imagen $FULL_IMAGE..."
-    docker pull "$FULL_IMAGE" || { echo "[!] Pull falló. ¿Hiciste docker login?"; exit 1; }
+    if ! docker pull "$FULL_IMAGE" 2>/dev/null; then
+        echo "[*] Pull falló. Probablemente necesita docker login en $REGISTRY."
+        if docker login "$REGISTRY"; then
+            docker pull "$FULL_IMAGE" || { echo "[!] Pull sigue fallando tras login."; exit 1; }
+        else
+            echo "[!] docker login canceló. Aborta."
+            exit 1
+        fi
+    fi
 else
     FULL_IMAGE="$IMAGE_TAG"
     echo "[*] Modo build local (no registry)."
@@ -184,47 +197,114 @@ WD_EOF
 
 systemctl enable --now cron >/dev/null 2>&1 || service cron start
 
-# 9. Salida con instrucciones
+# 9. bot-cli
+install -m 755 "$DEPLOY_DIR/bot-cli" /usr/local/bin/bot-cli
+echo "[*] bot-cli instalado. Usa 'bot-cli help' para ver comandos."
+
+# 10. Clone del repo del bot (necesita deploy key en GitHub)
 LXC_IP=$(hostname -I | awk '{print $1}')
 
-cat <<INSTRUCCIONES
+if [ ! -d "$APP_DIR/.git" ]; then
+    echo
+    echo "============================================================"
+    echo " DEPLOY KEY (pégala en GitHub si aún no lo has hecho):"
+    echo " https://github.com/$(echo "$REPO_SSH" | sed -E 's|git@github.com:||; s|\.git$||')/settings/keys"
+    echo " 'Allow write access' DESACTIVADO."
+    echo "============================================================"
+    cat /root/.ssh/id_ed25519.pub
+    echo "============================================================"
+    echo
+    read -r -p "¿Has pegado ya la deploy key en GitHub? [s/N] " ANSWER
+    if [[ "$ANSWER" =~ ^[sSyY]$ ]]; then
+        echo "[*] Verificando conectividad SSH a GitHub..."
+        if ssh -T -o StrictHostKeyChecking=accept-new git@github.com 2>&1 | grep -q "successfully authenticated"; then
+            echo "[*] Clonando $REPO_SSH en $APP_DIR..."
+            git clone --branch "$BRANCH" "$REPO_SSH" "$APP_DIR"
+            chown -R 911:911 "$APP_DIR"
+            cd "$APP_DIR"
+            git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" 2>/dev/null || true
+            echo "[OK] Repo clonado."
+        else
+            echo "[!] La deploy key no responde aún. Espera unos segundos y reintenta:"
+            echo "      $0"
+            exit 0
+        fi
+    else
+        echo "[!] Pega la deploy key y vuelve a ejecutar: $0"
+        exit 0
+    fi
+else
+    echo "[*] Repo del bot ya clonado en $APP_DIR. Actualizando..."
+    cd "$APP_DIR"
+    git fetch origin
+    git checkout "$BRANCH" 2>/dev/null || true
+    git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" 2>/dev/null || true
+    chown -R 911:911 "$APP_DIR"
+fi
 
-============================================================
- DEPLOY KEY (pégala en GitHub)
- https://github.com/$(echo "$REPO_SSH" | sed -E 's|git@github.com:||; s|\.git$||')/settings/keys
- Marca "Allow write access" como DESACTIVADO.
-============================================================
-$(cat /root/.ssh/id_ed25519.pub)
-============================================================
+# 11. Crear .env desde plantilla si no existe
+ENV_FILE="$BOT_CONFIG_DIR/.env"
 
-PASOS RESTANTES (manuales, una sola vez):
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$APP_DIR/.env.example" ]; then
+        cp "$APP_DIR/.env.example" "$ENV_FILE"
+    elif [ -f "$DEPLOY_DIR/.env.example" ]; then
+        cp "$DEPLOY_DIR/.env.example" "$ENV_FILE"
+    else
+        cat > "$ENV_FILE" <<'ENVEOF'
+# Rellenar con valores reales
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+MT5_LOGIN=
+MT5_PASSWORD=
+MT5_SERVER=
+ENVEOF
+    fi
+    chown 911:911 "$ENV_FILE"
+    chmod 640 "$ENV_FILE"
+    echo
+    echo "[*] Se ha creado $ENV_FILE desde la plantilla."
+    echo "[!] Edítalo con tus credenciales reales antes de continuar:"
+    echo "      nano $ENV_FILE"
+    echo
+    read -r -p "¿Quieres editarlo ahora? [S/n] " ANSWER
+    if [[ ! "$ANSWER" =~ ^[nN]$ ]]; then
+        nano "$ENV_FILE"
+    fi
+else
+    echo "[*] $ENV_FILE ya existe, no se sobreescribe."
+    chown 911:911 "$ENV_FILE"
+    chmod 640 "$ENV_FILE"
+fi
 
-1. Pegar la deploy key en GitHub (URL arriba).
+# 12. Arranque
+echo
+echo "[*] Lanzando sync_and_deploy.sh para levantar el contenedor..."
+/usr/local/bin/sync_and_deploy.sh
 
-2. Clonar el repo PRIVADO del bot (vía SSH):
-     git clone $REPO_SSH $APP_DIR
-     cd $APP_DIR && git branch --set-upstream-to=origin/$BRANCH $BRANCH
+sleep 3
 
-3. Crear $BOT_CONFIG_DIR/.env:
-     cp $DEPLOY_DIR/.env.example $BOT_CONFIG_DIR/.env
-     nano $BOT_CONFIG_DIR/.env
-     chmod 640 $BOT_CONFIG_DIR/.env
-     chown 911:911 $BOT_CONFIG_DIR/.env
-
-4. Forzar primer arranque:
-     /usr/local/bin/sync_and_deploy.sh
-     docker ps    # debe mostrar $CONTAINER_NAME
-
-5. Acceder por VNC para login MT5 y AutoTrading:
-     http://${LXC_IP}:${VNC_PORT}
-     - File → Login to Trade Account
-     - Tools → Options → Expert Advisors → Allow algorithmic trading
-     - Botón AutoTrading (debe quedar verde)
-
-6. Logs:
-     tail -f $LOG_FILE                                    # watcher/watchdog
-     docker logs -f $CONTAINER_NAME                       # contenedor
-     tail -f $BOT_CONFIG_DIR/bot.log                      # bot Python
-
-============================================================
-INSTRUCCIONES
+if docker ps --filter "name=^${CONTAINER_NAME}$" --format '{{.Names}}' | grep -q "$CONTAINER_NAME"; then
+    echo
+    echo "============================================================"
+    echo " SETUP COMPLETO."
+    echo "============================================================"
+    echo " Contenedor:    $CONTAINER_NAME (running)"
+    echo " VNC:           http://${LXC_IP}:${VNC_PORT}"
+    echo " Logs bot:      tail -f $BOT_CONFIG_DIR/bot.log"
+    echo " Logs contenedor: docker logs -f $CONTAINER_NAME"
+    echo
+    echo " PRÓXIMOS PASOS MANUALES:"
+    echo "   1. Acceder a VNC y hacer login en MT5 con tus credenciales."
+    echo "      Activar 'Allow algorithmic trading' en Tools > Options > Expert Advisors."
+    echo "      Pulsar el botón 'AutoTrading' (debe quedar verde)."
+    echo
+    echo "   2. Para el primer login de Telegram (te llegará un código):"
+    echo "      bot-cli telegram-login"
+    echo "============================================================"
+else
+    echo "[!] El contenedor no arrancó. Revisa:"
+    echo "      tail -50 $LOG_FILE"
+    echo "      docker logs $CONTAINER_NAME"
+    exit 1
+fi

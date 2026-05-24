@@ -1,5 +1,24 @@
 # Troubleshooting
 
+## Comandos útiles (bot-cli)
+
+Todas las operaciones comunes se hacen con `bot-cli`. Ejecuta `bot-cli help` para ver la lista.
+
+| Comando | Para qué |
+|---------|----------|
+| `bot-cli status` | Estado general (contenedor, repo, archivos críticos) |
+| `bot-cli logs` | Logs del contenedor (s6 + Wine) |
+| `bot-cli bot-logs` | Logs del bot Python (más limpios) |
+| `bot-cli restart` | Reinicia el contenedor sin rebuild |
+| `bot-cli pull-and-restart` | git pull + reinicio (forzar actualización) |
+| `bot-cli telegram-login` | Login interactivo de Telethon (primera vez) |
+| `bot-cli env-edit` | Editar `/opt/bot-config/.env` con permisos correctos |
+| `bot-cli env-show` | Ver `.env` con passwords enmascaradas |
+| `bot-cli vnc` | URL de VNC para login MT5 |
+| `bot-cli rebuild-image` | Pull de nueva imagen + restart |
+| `bot-cli shell` | Shell dentro del contenedor como `abc` |
+| `bot-cli mt5-shell` | Python interactivo con `import MetaTrader5` listo |
+
 ## El contenedor no arranca
 
 ### `disk quota exceeded` durante `docker pull`

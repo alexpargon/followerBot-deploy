@@ -5,9 +5,8 @@ Guía paso a paso para desplegar el bot desde cero en Proxmox VE.
 ## Requisitos previos
 
 - Proxmox VE 8.x funcionando.
-- Cuenta de GitHub con acceso al repo privado `alexpargon/followerBot`.
-- Credenciales MT5 + API de Telegram (api_id, api_hash).
-- Móvil a mano para el código SMS de Telegram (solo primera vez).
+- Un LXC del registry ya montado (ver más abajo).
+- Imagen `followerbot:1.0` (o la versión actual) subida al registry.
 
 ## Arquitectura de volúmenes
 
@@ -18,7 +17,7 @@ Guía paso a paso para desplegar el bot desde cero en Proxmox VE.
 
 > El wineprefix con Python 3.11 y las librerías del bot vive **dentro de la imagen Docker**, no se persiste en volumen del host. Al recrear el contenedor con una nueva imagen, hay que volver a hacer login manual en MT5 vía VNC. Esto es la operación normal de upgrade.
 
-## Paso 1 — Crear el LXC del Docker Registry (una sola vez)
+## Crear el LXC del Docker Registry (una sola vez)
 
 En la shell de Proxmox VE:
 
@@ -38,116 +37,84 @@ chmod +x /tmp/setup-registry.sh
 /tmp/setup-registry.sh <usuario> <password>
 ```
 
-> Como el repo `followerBot-deploy` es público, no se necesita autenticación.
+Anota la IP del LXC. Configura un hostname en tu DNS/router (recomendado: `registry.lan`).
 
-Anota la IP del LXC. Configura un hostname en Unifi (recomendado: `registry.lan`).
-
-## Paso 2 — Construir y subir la imagen del bot
+## Construir y subir la imagen del bot
 
 Desde tu máquina de desarrollo (o cualquier LXC con Docker):
 
 ```bash
-# Clonar el repo público con el Dockerfile:
 git clone https://github.com/alexpargon/followerBot-deploy.git
 cd followerBot-deploy
 
-# Configurar el registry como insecure (HTTP, no HTTPS):
 cat > /etc/docker/daemon.json <<'EOF'
-{
-  "insecure-registries": ["registry.lan:5000"]
-}
+{ "insecure-registries": ["registry.lan:5000"] }
 EOF
-systemctl restart docker
-sleep 3
+systemctl restart docker && sleep 3
 
-# Login y build:
 docker login registry.lan:5000 -u <usuario>
 docker build -t followerbot:1.0 .
 docker tag followerbot:1.0 registry.lan:5000/followerbot:1.0
-docker tag followerbot:1.0 registry.lan:5000/followerbot:latest
 docker push registry.lan:5000/followerbot:1.0
-docker push registry.lan:5000/followerbot:latest
 ```
 
 > El build tarda 10-20 min la primera vez.
 
-## Paso 3 — Crear el LXC del bot
+## Instalación de un nuevo bot LXC
 
-Desde Proxmox host:
+### Crear el LXC del bot
 
+En la shell de Proxmox:
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/docker.sh)"
 ```
+Advanced → Debian → 15 GB disco → 1.5 GB RAM → 1 core → `nesting=1,keyctl=1`.
 
-**Advanced**, **Debian**, **20 GB disco**, **2 GB RAM**, **2 CPU**.
-
-## Paso 4 — Ejecutar setup-lxc.sh
+### Ejecutar el setup
 
 ```bash
-pct enter <VMID-bot>
+pct enter <VMID>
 apt-get update && apt-get install -y curl
 curl -fsSL https://raw.githubusercontent.com/alexpargon/followerBot-deploy/main/setup-lxc.sh -o /tmp/setup-lxc.sh
 chmod +x /tmp/setup-lxc.sh
 REGISTRY="registry.lan:5000" IMAGE_TAG="followerbot:1.0" /tmp/setup-lxc.sh
 ```
 
-El script imprimirá una **deploy key SSH**. Cópiala.
+El script te guiará paso a paso:
+1. Genera deploy key SSH e imprime para que la pegues en GitHub.
+2. Si confirmas que la pegaste, clona el repo del bot.
+3. Crea `/opt/bot-config/.env` desde la plantilla y abre `nano` para que lo rellenes.
+4. Hace `docker pull` de la imagen (te pide login si falta).
+5. Levanta el contenedor.
+6. Te explica los dos pasos manuales restantes (MT5 vía VNC, Telegram vía `bot-cli`).
 
-## Paso 5 — Pegar la deploy key en GitHub
+### Pasos manuales (ineludibles, ~5 minutos)
 
-`https://github.com/alexpargon/followerBot/settings/keys` → **Add deploy key**. "Allow write access" desmarcado.
+**MT5**: navegador → `http://<IP-LXC>:3000` → Login MT5 → Tools → Options → Expert Advisors → Allow algorithmic trading → botón AutoTrading verde.
 
-Verifica:
+**Telegram** (primer login):
+```bash
+bot-cli telegram-login
+```
+Pedirá phone → code (llega por Telegram) → password 2FA si la tienes.
+
+### Verificación
 
 ```bash
-ssh -T git@github.com
+bot-cli status
+bot-cli bot-logs
 ```
 
-## Paso 6 — Login en el registry y pull de la imagen
+## Operaciones del día a día
+
+Todas las operaciones comunes se realizan con `bot-cli`. Ejecuta `bot-cli help` para la lista completa.
 
 ```bash
-docker login registry.lan:5000 -u <usuario>
-docker pull registry.lan:5000/followerbot:1.0
+bot-cli status            # Estado general
+bot-cli logs              # Logs contenedor
+bot-cli bot-logs          # Logs bot Python
+bot-cli restart           # Reinicio rápido
+bot-cli pull-and-restart  # Actualizar código + reinicio
+bot-cli env-edit          # Editar .env con permisos correctos
+bot-cli rebuild-image     # Tras subir nueva imagen al registry
 ```
-
-## Paso 7 — Clonar el repo del bot (privado, con SSH)
-
-```bash
-git clone git@github.com:alexpargon/followerBot.git /opt/mi_trading_bot
-cd /opt/mi_trading_bot
-git branch --set-upstream-to=origin/master master
-```
-
-## Paso 8 — Crear .env
-
-```bash
-cp /opt/followerbot-deploy/.env.example /opt/bot-config/.env
-nano /opt/bot-config/.env  # rellena valores reales
-chmod 640 /opt/bot-config/.env
-chown 911:911 /opt/bot-config/.env
-```
-
-## Paso 9 — Login MT5 vía VNC
-
-`hostname -I` → IP. Navegador: `http://<IP>:3000`.
-
-1. `File → Login to Trade Account` con credenciales MT5.
-2. `Tools → Options → Expert Advisors` → **Allow algorithmic trading**.
-3. Botón **AutoTrading** → verde.
-
-## Paso 10 — Forzar primer arranque
-
-```bash
-/usr/local/bin/sync_and_deploy.sh
-docker ps
-tail -f /opt/bot-config/bot.log
-```
-
-La primera vez Telethon pedirá código SMS; ejecútalo en modo interactivo:
-
-```bash
-docker exec -it followerbot bash
-# dentro, lanzar main.py una vez a mano para que Telethon te pida el código
-```
-
-Tras esto, todo es automático.
