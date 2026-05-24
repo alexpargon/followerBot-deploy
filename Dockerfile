@@ -14,10 +14,21 @@ USER root
 ARG PYTHON_VERSION=3.11.9
 ARG PYTHON_EMBED_ZIP=python-${PYTHON_VERSION}-embed-amd64.zip
 
-RUN apt-get update && apt-get install -y --no-install-recommends unzip && rm -rf /var/lib/apt/lists/*
+# Asegurar unzip disponible.
+# La imagen base suele traerlo, pero si no, deshabilitamos temporalmente
+# el repo de WineHQ (cuya GPG suele caducar) y restauramos después.
+RUN if ! command -v unzip >/dev/null 2>&1; then \
+        mv /etc/apt/sources.list.d/winehq*.list /tmp/ 2>/dev/null || true ; \
+        apt-get update ; \
+        apt-get install -y --no-install-recommends unzip ; \
+        rm -rf /var/lib/apt/lists/* ; \
+        mv /tmp/winehq*.list /etc/apt/sources.list.d/ 2>/dev/null || true ; \
+    else \
+        echo "unzip ya instalado en la imagen base, skip." ; \
+    fi
 
 RUN curl -fsSL "https://www.python.org/ftp/python/${PYTHON_VERSION}/${PYTHON_EMBED_ZIP}" \
-        -o /tmp/${PYTHON_EMBED_ZIP}
+  -o /tmp/${PYTHON_EMBED_ZIP}
 
 # ---------------------------------------------------------------------------
 # 2. Preparar /config y entorno de Wine
@@ -26,10 +37,10 @@ RUN mkdir -p /config && chown -R abc:abc /config
 
 USER abc
 ENV HOME=/config \
-    WINEDEBUG=-all \
-    DISPLAY=:0 \
-    XDG_RUNTIME_DIR=/tmp/runtime-abc \
-    WINEPREFIX=/config/.wine
+  WINEDEBUG=-all \
+  DISPLAY=:0 \
+  XDG_RUNTIME_DIR=/tmp/runtime-abc \
+  WINEPREFIX=/config/.wine
 
 RUN mkdir -p /tmp/runtime-abc && chmod 700 /tmp/runtime-abc
 
@@ -44,9 +55,9 @@ RUN wineboot --init && wineserver -w
 # ---------------------------------------------------------------------------
 USER root
 RUN mkdir -p /config/.wine/drive_c/Python311 \
- && unzip -q /tmp/${PYTHON_EMBED_ZIP} -d /config/.wine/drive_c/Python311 \
- && rm /tmp/${PYTHON_EMBED_ZIP} \
- && chown -R abc:abc /config/.wine/drive_c/Python311
+  && unzip -q /tmp/${PYTHON_EMBED_ZIP} -d /config/.wine/drive_c/Python311 \
+  && rm /tmp/${PYTHON_EMBED_ZIP} \
+  && chown -R abc:abc /config/.wine/drive_c/Python311
 
 # ---------------------------------------------------------------------------
 # 5. Habilitar 'site' module (necesario para pip)
@@ -62,20 +73,20 @@ RUN sed -i 's|^#import site|import site|' /config/.wine/drive_c/Python311/python
 # ---------------------------------------------------------------------------
 USER root
 RUN curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py \
- && chown abc:abc /tmp/get-pip.py
+  && chown abc:abc /tmp/get-pip.py
 
 USER abc
 RUN wine "C:\\Python311\\python.exe" /tmp/get-pip.py --no-warn-script-location \
-    ; sleep 3 \
-    ; wineserver -w \
-    ; rm -f /tmp/get-pip.py \
-    ; true
+  ; sleep 3 \
+  ; wineserver -w \
+  ; rm -f /tmp/get-pip.py \
+  ; true
 
 # ---------------------------------------------------------------------------
 # 7. Verificar que python y pip funcionan
 # ---------------------------------------------------------------------------
 RUN wine "C:\\Python311\\python.exe" --version \
- && wine "C:\\Python311\\python.exe" -m pip --version
+  && wine "C:\\Python311\\python.exe" -m pip --version
 
 # ---------------------------------------------------------------------------
 # 8. Instalar dependencias del bot
@@ -83,9 +94,9 @@ RUN wine "C:\\Python311\\python.exe" --version \
 COPY --chown=abc:abc requirements.lock.txt /tmp/requirements.lock.txt
 
 RUN wine "C:\\Python311\\python.exe" -m pip install --upgrade pip \
- && wine "C:\\Python311\\python.exe" -m pip install -r /tmp/requirements.lock.txt \
- && wineserver -w \
- && rm /tmp/requirements.lock.txt
+  && wine "C:\\Python311\\python.exe" -m pip install -r /tmp/requirements.lock.txt \
+  && wineserver -w \
+  && rm /tmp/requirements.lock.txt
 
 # ---------------------------------------------------------------------------
 # 9. Verificar que los imports críticos funcionan
@@ -103,8 +114,8 @@ RUN chmod +x /etc/services.d/followerbot/run /etc/services.d/followerbot/finish
 # 11. Variables de entorno del bot
 # ---------------------------------------------------------------------------
 ENV BOT_DATA_DIR=/config/bot-data \
-    BOT_CODE_DIR=/config/mi_trading_bot \
-    BOT_PYTHON='C:\Python311\python.exe'
+  BOT_CODE_DIR=/config/mi_trading_bot \
+  BOT_PYTHON='C:\Python311\python.exe'
 
 # ---------------------------------------------------------------------------
 # 12. Directorio de estado

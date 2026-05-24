@@ -32,6 +32,12 @@ La versión 2.0.2+ del Dockerfile usa el **Python embeddable** (un zip auto-cont
 
 La imagen base normalmente trae `unzip`, pero si una actualización lo quitase, el Dockerfile lo reinstala automáticamente con `apt-get`. Si tu build falla aquí, verifica conectividad a `deb.debian.org` desde dentro del LXC donde construyes.
 
+### `NO_PUBKEY` del repo de WineHQ durante el build
+
+La imagen base `gmag11/metatrader5_vnc` configura un repo APT de WineHQ cuya clave GPG puede caducar con el tiempo. No usamos ese repo (Wine ya viene en la base), pero `apt-get update` falla si está presente y la clave no es válida.
+
+El Dockerfile lo esquiva: comprueba si necesita usar `apt` (solo si falta `unzip`), y en ese caso mueve temporalmente el repo winehq fuera, hace el `apt`, y lo restaura. Si añades pasos nuevos al Dockerfile que requieran `apt`, aplica el mismo patrón.
+
 ## El bot Python falla al arrancar
 
 ### `PermissionError: '.env'`
