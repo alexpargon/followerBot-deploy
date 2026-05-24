@@ -1,0 +1,15 @@
+#!/usr/bin/with-contenv bash
+# Servicio s6: lanza followerBot y se queda en foreground (s6 supervisa).
+set -e
+
+cd "${BOT_CODE_DIR:-/config/mi_trading_bot}"
+
+# Esperar a que el wineprefix esté listo y MT5 arrancado
+sleep 10
+
+# Asegurar permisos del directorio de datos (por si el volumen viene de host con UID diferente)
+chown -R abc:abc "${BOT_DATA_DIR:-/config/bot-data}" 2>/dev/null || true
+
+# Lanzar como abc, en foreground (s6 supervisa este proceso)
+exec s6-setuidgid abc \
+    wine "${BOT_PYTHON:-C:\\Program Files\\Python311\\python.exe}" main.py

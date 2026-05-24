@@ -1,0 +1,7 @@
+# Solo para evitar accidentes — este repo no debería contener nada de esto:
+.env
+*.session
+*.session-journal
+trades.db
+*.log
+__pycache__/

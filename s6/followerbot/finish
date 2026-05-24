@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bash
+# Si el proceso muere, s6 espera 5s y relanza
+echo "[s6] followerbot finished (exit=$1, signal=$2). Restart en 5s..."
+sleep 5
