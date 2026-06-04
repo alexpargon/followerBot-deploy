@@ -155,17 +155,34 @@ El repo `followerBot-deploy` es público — no debería pedir auth. Si lo pide,
 
 ### `ModuleNotFoundError` para módulos locales del bot (`config`, `engine`, etc.)
 
-Python embeddable bajo Wine ignora `PYTHONPATH` (define `sys.path` desde `python311._pth`). El bot debe garantizar que su propio directorio esté en `sys.path`.
-
-Esto se resuelve **dentro del bot** (no en el deploy) al principio de `main.py`:
+Python embeddable bajo Wine ignora `PYTHONPATH` (define `sys.path` desde `python311._pth`). Por eso el bot adopta layout `src/` y `main.py` es un shim que inyecta `src/` en `sys.path` antes de cualquier import del proyecto:
 
 ```python
+# main.py (raíz del repo del bot)
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+from followerbot.bootstrap import ensure_dependencies
+ensure_dependencies()
+from followerbot.app import main
+if __name__ == "__main__":
+    main()
 ```
 
-Es el patrón estándar de Python para scripts con módulos hermanos. Si añades nuevos archivos al bot que necesiten ser importables como módulos, asegúrate de que están en el mismo directorio que `main.py` o que su path está en `sys.path`.
+Todo el código vive bajo `src/followerbot/` (y `src/followerbot/channels/`). Si añades nuevos módulos, ponlos dentro del paquete y usa imports relativos (`from .config import ...`). No hace falta tocar nada del deploy.
+
+### `ModuleNotFoundError` para librerías de terceros (`requests`, `MetaTrader5`, ...)
+
+El bot incluye un módulo `src/followerbot/bootstrap.py` que se ejecuta al arranque y, si detecta imports rotos, ejecuta `sys.executable -m pip install -r requirements.lock.txt` para auto-reparar.
+
+Si esto falla (p. ej. sin conexión a internet), instala manualmente dentro del contenedor:
+
+```bash
+docker exec -u abc followerbot \
+  wine 'C:\Python311\python.exe' -m pip install -r /config/mi_trading_bot/requirements.lock.txt
+```
+
+**Importante**: usa siempre la ruta explícita `C:\Python311\python.exe`. `wine python.exe` (sin ruta) puede resolver a otro Python instalado en el wineprefix (p. ej. `Python39-32`) y los paquetes acabarían en el sitio equivocado.
 
 ### El bot crashea en bucle con `MT5 initialize failed` durante el primer arranque
 

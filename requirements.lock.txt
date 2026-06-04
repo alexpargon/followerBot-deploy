@@ -1,4 +1,9 @@
-MetaTrader5==5.0.45
+MetaTrader5==5.0.5735
 Telethon==1.36.0
 python-dotenv==1.0.1
-numpy==1.26.4
+numpy==2.2.6
+requests==2.34.2
+urllib3==2.7.0
+certifi==2026.5.20
+idna==3.18
+charset-normalizer==3.4.7
