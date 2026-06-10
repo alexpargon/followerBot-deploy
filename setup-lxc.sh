@@ -14,6 +14,7 @@ REPO_SSH="${REPO_SSH:-git@github.com:alexpargon/followerBot.git}"
 BRANCH="${BRANCH:-master}"
 APP_DIR="${APP_DIR:-/opt/mi_trading_bot}"
 BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
+MT5_USER_DIR="${MT5_USER_DIR:-/opt/mt5_userdata}"
 CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
 VNC_PORT="${VNC_PORT:-3000}"
 LOG_FILE="${LOG_FILE:-/var/log/followerbot-sync.log}"
@@ -47,8 +48,8 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 git config --system --add safe.directory '*' 2>/dev/null || true
 
 # 2. Directorios
-mkdir -p "$APP_DIR" "$BOT_CONFIG_DIR"
-chown -R 911:911 "$BOT_CONFIG_DIR"
+mkdir -p "$APP_DIR" "$BOT_CONFIG_DIR" "$MT5_USER_DIR"
+chown -R 911:911 "$BOT_CONFIG_DIR" "$MT5_USER_DIR"
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
 
 # 3. Deploy key SSH (para clonar el repo PRIVADO del bot)
@@ -120,6 +121,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_DIR="$APP_DIR"
 BOT_CONFIG_DIR="$BOT_CONFIG_DIR"
+MT5_USER_DIR="$MT5_USER_DIR"
 CONTAINER_NAME="$CONTAINER_NAME"
 IMAGE="$FULL_IMAGE"
 VNC_PORT="$VNC_PORT"
@@ -129,17 +131,19 @@ APP_GID=911
 fix_perms() {
     chown -R "\${APP_UID}:\${APP_GID}" "\$APP_DIR" 2>/dev/null || true
     chown -R "\${APP_UID}:\${APP_GID}" "\$BOT_CONFIG_DIR" 2>/dev/null || true
+    chown -R "\${APP_UID}:\${APP_GID}" "\$MT5_USER_DIR" 2>/dev/null || true
     [ -f "\$BOT_CONFIG_DIR/.env" ] && chmod 640 "\$BOT_CONFIG_DIR/.env" 2>/dev/null || true
 }
 
 run_container() {
     docker rm -f "\$CONTAINER_NAME" >/dev/null 2>&1 || true
-    docker run -d \\
-        --name "\$CONTAINER_NAME" \\
-        --restart unless-stopped \\
-        -p "\${VNC_PORT}:3000" \\
-        -v "\$APP_DIR:/config/mi_trading_bot" \\
-        -v "\$BOT_CONFIG_DIR:/config/bot-data" \\
+    docker run -d \
+        --name "\$CONTAINER_NAME" \
+        --restart unless-stopped \
+        -p "\${VNC_PORT}:3000" \
+        -v "\$APP_DIR:/config/mi_trading_bot" \
+        -v "\$BOT_CONFIG_DIR:/config/bot-data" \
+        -v "\$MT5_USER_DIR:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes/Terminal" \
         "\$IMAGE"
     echo "[OK] Contenedor levantado: \$CONTAINER_NAME"
 }

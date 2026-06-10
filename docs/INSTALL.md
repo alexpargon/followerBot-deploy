@@ -14,8 +14,9 @@ Guía paso a paso para desplegar el bot desde cero en Proxmox VE.
 
 - `/opt/mi_trading_bot` → código del bot (clonado de github.com/alexpargon/followerBot, gestionado por el watcher git).
 - `/opt/bot-config` → estado del bot (.env, sesión de Telegram, trades.db, logs).
+- `/opt/mt5_userdata` → datos de usuario de MT5: EAs, indicadores, scripts, settings (`terminal.ini`, profiles, charts).
 
-> El wineprefix con Python 3.11 y las librerías del bot vive **dentro de la imagen Docker**, no se persiste en volumen del host. Al recrear el contenedor con una nueva imagen, hay que volver a hacer login manual en MT5 vía VNC. Esto es la operación normal de upgrade.
+> El wineprefix con Python 3.11 y las librerías del bot vive **dentro de la imagen Docker**, no se persiste en volumen del host. El ejecutable MT5 y sus archivos en `Program Files` también viven en la imagen — al actualizar imagen se reinstalan MT5 desde cero automáticamente. Solo los datos de usuario (`EAs`, indicadores, `terminal.ini`, etc.) se preservan entre upgrades.
 
 ## Crear el LXC del Docker Registry (una sola vez)
 

@@ -67,12 +67,9 @@ Si reaparece este error tras una modificación del Dockerfile, comprueba que la 
 
 Esto pasaba en versiones tempranas de `setup-lxc.sh` que montaban `/opt/mt5_data:/config`. Ese mount **enmascara** el `/config` de la imagen (que contiene wineprefix, Python 3.11 y librerías) con un directorio vacío del host.
 
-Solución: NO montar nada sobre `/config` entero. El wineprefix forma parte de la imagen. Si necesitas persistir estado del bot, monta `/opt/bot-config:/config/bot-data` (subdirectorio específico). Si necesitas persistir config interna de MT5 (servidores conocidos, terminal.ini), monta sólo el subdirectorio relevante:
-```
--v /opt/mt5_terminal:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes
-```
+Los datos de usuario de MT5 (EAs, indicadores, `terminal.ini`) se persistencen ahora en `/opt/mt5_userdata` (montado en `.../MetaQuotes/Terminal/`). El wineprefix base y el ejecutable MT5 viven en la imagen y se reinstalan desde cero al actualizar imagen — esto es normal.
 
-Pero **nunca** sobre `/config` entero.
+**Regla**: nunca montes nada directamente sobre `/config` (el directorio base de la imagen). Si necesitas persistir algo, monta un **subdirectorio específico** dentro de `/config`.
 
 ## El bot Python falla al arrancar
 
