@@ -5,6 +5,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_DIR="${APP_DIR:-/opt/mi_trading_bot}"
 BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
+MT5_DATA_DIR="${MT5_DATA_DIR:-/opt/mt5-data}"
 CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
 IMAGE="${IMAGE:-localhost:5000/followerbot:latest}"
 VNC_PORT="${VNC_PORT:-3000}"
@@ -14,17 +15,20 @@ APP_GID=911
 fix_perms() {
     chown -R "${APP_UID}:${APP_GID}" "$APP_DIR" 2>/dev/null || true
     chown -R "${APP_UID}:${APP_GID}" "$BOT_CONFIG_DIR" 2>/dev/null || true
+    chown -R "${APP_UID}:${APP_GID}" "$MT5_DATA_DIR" 2>/dev/null || true
     [ -f "$BOT_CONFIG_DIR/.env" ] && chmod 640 "$BOT_CONFIG_DIR/.env" 2>/dev/null || true
 }
 
 run_container() {
     docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    mkdir -p "$MT5_DATA_DIR" && chown -R "${APP_UID}:${APP_GID}" "$MT5_DATA_DIR"
     docker run -d \
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
         -p "${VNC_PORT}:3000" \
         -v "$APP_DIR:/config/mi_trading_bot" \
         -v "$BOT_CONFIG_DIR:/config/bot-data" \
+        -v "$MT5_DATA_DIR:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes" \
         "$IMAGE"
     echo "[OK] Contenedor levantado: $CONTAINER_NAME"
 }
