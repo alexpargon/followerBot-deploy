@@ -75,7 +75,12 @@ Formato de respuesta (`/logs`):
   token configurado, el servicio **rechaza arrancar** (no sirve nada sin
   auth por defecto).
 - El servicio corre como el usuario `911` (mismo dueño que `/opt/bot-config`),
-  con `NoNewPrivileges` y `ProtectSystem=strict` en la unit de systemd.
+  sin privilegios de escritura fuera de esos paths y con `NoNewPrivileges` en
+  la unit de systemd. (`ProtectSystem=strict` + `ReadOnlyPaths=` se probaron
+  y se retiraron: el mount namespace que crean rompe la apertura de
+  `trades.db` por sqlite3 — "unable to open database file" — aunque las
+  lecturas planas de `bot.log`/`audit_log.jsonl` sí funcionan por el mismo
+  mount. La protección real ya la da `User=911` sin permisos de escritura.)
 - Escucha en `0.0.0.0:8765` — pensado para LAN interna / detrás de VPN
   (Tailscale, WireGuard, etc.), **no** para exponer el puerto a internet.
   Si necesitas restringirlo a una interfaz concreta, sobreescribe
