@@ -31,6 +31,21 @@ if ! command -v python3 >/dev/null 2>&1; then
     apt-get update -qq && apt-get install -y -qq python3
 fi
 
+# The systemd unit runs as UID/GID 911 to match the owner of /opt/bot-config
+# and /opt/mi_trading_bot (911:911, the Docker image's internal "abc" user)
+# instead of root -- but that UID only exists *inside* the container image.
+# The bare LXC host has no such account (setup-lxc.sh only ever `chown -R
+# 911:911`, which works without a named account existing; systemd's User=
+# directive does need one to resolve). Create it here, idempotently.
+if ! getent group 911 >/dev/null; then
+    echo "[*] Creating group 911 (matches the container's data owner)..."
+    groupadd -g 911 followerbot
+fi
+if ! getent passwd 911 >/dev/null; then
+    echo "[*] Creating user 911 (matches the container's data owner)..."
+    useradd -u 911 -g 911 -M -N -s /usr/sbin/nologin -c "followerBot data owner" followerbot
+fi
+
 if [ -f "$TOKEN_FILE" ]; then
     echo "[*] $TOKEN_FILE already exists, leaving token untouched."
 else
