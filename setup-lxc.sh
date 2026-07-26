@@ -222,7 +222,15 @@ if [ ! -d "$APP_DIR/.git" ]; then
     read -r -p "¿Has pegado ya la deploy key en GitHub? [s/N] " ANSWER
     if [[ "$ANSWER" =~ ^[sSyY]$ ]]; then
         echo "[*] Verificando conectividad SSH a GitHub..."
-        if ssh -T -o StrictHostKeyChecking=accept-new git@github.com 2>&1 | grep -q "successfully authenticated"; then
+        # GitHub's SSH check always exits 1 even on a SUCCESSFUL auth (it
+        # authenticates, then refuses shell access) — with `set -o pipefail`
+        # active at the top of this script, piping straight into `grep -q`
+        # makes the `if` see ssh's exit 1, not grep's exit 0, so it always
+        # took the failure branch even when the key was already working.
+        # Capture the output first (neutralizing ssh's own exit code with
+        # `|| true`) and grep that instead.
+        SSH_CHECK=$(ssh -T -o StrictHostKeyChecking=accept-new git@github.com 2>&1 || true)
+        if echo "$SSH_CHECK" | grep -q "successfully authenticated"; then
             echo "[*] Clonando $REPO_SSH en $APP_DIR..."
             git clone --branch "$BRANCH" "$REPO_SSH" "$APP_DIR"
             chown -R 911:911 "$APP_DIR"
