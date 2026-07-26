@@ -16,10 +16,17 @@ Restart=on-failure
 RestartSec=5
 User=911
 Group=911
-# Read-only exposure by design: no capability to write anywhere it matters.
+# Read-only exposure by design: the process itself never writes anywhere
+# (see log_server.py), and User=911 already can't write outside paths it
+# owns -- that's the real protection. NoNewPrivileges is kept as cheap
+# extra hardening. ProtectSystem=strict + ReadOnlyPaths= (previously set
+# here) additionally sandboxed the filesystem via a mount namespace, which
+# broke sqlite3's ability to open trades.db ("unable to open database
+# file") even though plain file reads (bot.log, audit_log.jsonl) worked
+# fine through the same mount -- likely an LXC-nested-namespace
+# interaction. Not worth the fragility for the marginal extra protection
+# on an already-unprivileged, read-only service.
 NoNewPrivileges=true
-ProtectSystem=strict
-ReadOnlyPaths=/opt/bot-config /opt/mi_trading_bot
 
 [Install]
 WantedBy=multi-user.target
