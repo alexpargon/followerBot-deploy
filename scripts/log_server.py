@@ -22,6 +22,11 @@ Endpoints (all require "Authorization: Bearer <token>" except /health):
   GET /logs?from=YYYY-MM-DD&to=YYYY-MM-DD
   GET /audit?from=YYYY-MM-DD&to=YYYY-MM-DD
   GET /trades?from=YYYY-MM-DD&to=YYYY-MM-DD
+  GET /stats?from=YYYY-MM-DD&to=YYYY-MM-DD
+      Aggregated performance + discrepancy diagnostics over the range,
+      built server-side from trades.db + audit_log.jsonl so a full
+      performance review doesn't require pulling every raw row over HTTP
+      and reassembling it client-side. See followerBot-deploy/docs/ANALYSIS.md.
 """
 from __future__ import annotations
 
@@ -147,6 +152,108 @@ def _bucket_trades(days: list[str]) -> dict:
     }
 
 
+# Guardian audit actions that represent a "hedge is live" event, keyed by
+# the `action` field in audit_log.jsonl entries with channel == "GUARDIAN".
+_GUARDIAN_ACTIONS = (
+    "hedge_opened", "hedge_rejected", "hedge_lock", "rearm", "max_hedges_cap_hit",
+)
+
+
+def _compute_stats(days: list[str]) -> dict:
+    """Aggregate trades.db + audit_log.jsonl into a single performance +
+    discrepancy report over `days`, so a review doesn't require pulling
+    every raw row over HTTP and reassembling it client-side.
+
+    by_strategy: per-strategy win rate / profit / pips / close-reason mix,
+    built from every trade opened-or-closed in range (same rows /trades
+    already exposes, just aggregated).
+
+    guardian: hedge-specific diagnostics from the audit log (there is no
+    other structured source for these — a rejected hedge, a lock, or a
+    re-arm never becomes a trades.db row). `hedges_opened_audit` vs
+    `hedges_opened_trades_db` should match; a gap means the async
+    report_open() task that writes trades.db didn't run (e.g. a crash
+    between the fill and the reporter task), which is itself a discrepancy
+    worth flagging rather than silently trusting either source alone.
+    `min_interval_sec` close to (or below) the deployment's
+    GUARDIAN_MIN_SECONDS_BETWEEN is the signature of the runaway hedging
+    loop fixed in ac51958/93329f5 — many hedges firing seconds apart
+    instead of the ladder gate spacing them out.
+    """
+    trade_days = _bucket_trades(days)
+    all_opened: list[dict] = []
+    all_closed: list[dict] = []
+    for v in trade_days.values():
+        all_opened.extend(v["opened"])
+        all_closed.extend(v["closed"])
+
+    strategies = {r.get("strategy", "UNKNOWN") for r in all_opened + all_closed}
+    by_strategy = {}
+    for name in sorted(strategies):
+        opened = [r for r in all_opened if r.get("strategy") == name]
+        closed = [r for r in all_closed if r.get("strategy") == name]
+        profits = [r["profit"] for r in closed if r.get("profit") is not None]
+        pips = [r["pips"] for r in closed if r.get("pips") is not None]
+        wins = sum(1 for p in profits if p >= 0)
+        close_reasons: dict[str, int] = {}
+        for r in closed:
+            reason = r.get("close_reason") or "UNKNOWN"
+            close_reasons[reason] = close_reasons.get(reason, 0) + 1
+        by_strategy[name] = {
+            "opened": len(opened),
+            "closed": len(closed),
+            "still_open": sum(1 for r in opened if r.get("close_price") is None),
+            "wins": wins,
+            "losses": len(profits) - wins,
+            "win_rate_pct": round(wins / len(profits) * 100, 1) if profits else None,
+            "total_profit": round(sum(profits), 2) if profits else 0.0,
+            "avg_profit": round(sum(profits) / len(profits), 2) if profits else None,
+            "avg_pips": round(sum(pips) / len(pips), 1) if pips else None,
+            "close_reasons": close_reasons,
+        }
+
+    audit_days = _bucket_audit_log(days)
+    guardian_events = [
+        e for v in audit_days.values() for e in v["events"]
+        if e.get("channel") == "GUARDIAN" and e.get("action") in _GUARDIAN_ACTIONS
+    ]
+    by_action: dict[str, list[dict]] = {a: [] for a in _GUARDIAN_ACTIONS}
+    for e in guardian_events:
+        by_action[e["action"]].append(e)
+
+    hedge_opens = sorted(
+        (e.get("ts", "") for e in by_action["hedge_opened"]),
+    )
+    intervals_sec = []
+    for prev, cur in zip(hedge_opens, hedge_opens[1:]):
+        try:
+            dt_prev = datetime.fromisoformat(prev.replace("Z", "+00:00"))
+            dt_cur = datetime.fromisoformat(cur.replace("Z", "+00:00"))
+            intervals_sec.append((dt_cur - dt_prev).total_seconds())
+        except ValueError:
+            continue
+
+    rejected = by_action["hedge_rejected"]
+    guardian = {
+        "hedges_opened_audit": len(by_action["hedge_opened"]),
+        "hedges_opened_trades_db": by_strategy.get("GUARDIAN", {}).get("opened", 0),
+        "hedges_rejected": len(rejected),
+        "hedges_rejected_no_free_margin": sum(
+            1 for e in rejected if e.get("details", {}).get("reason") == "no_free_margin"
+        ),
+        "hedges_rejected_broker": sum(
+            1 for e in rejected if e.get("details", {}).get("reason") == "broker_rejected"
+        ),
+        "hedges_locked": len(by_action["hedge_lock"]),
+        "rearms": len(by_action["rearm"]),
+        "max_hedges_cap_hits": len(by_action["max_hedges_cap_hit"]),
+        "min_hedge_interval_sec": min(intervals_sec) if intervals_sec else None,
+        "rapid_fire_count_under_30s": sum(1 for d in intervals_sec if d < 30),
+    }
+
+    return {"by_strategy": by_strategy, "guardian": guardian}
+
+
 def _git_status() -> dict:
     def _run(args):
         try:
@@ -198,6 +305,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/status":
                 self._send_json(200, _git_status())
+            elif path == "/stats":
+                from_str = qs.get("from", [""])[0]
+                to_str = qs.get("to", [""])[0]
+                days = _day_range(from_str, to_str)
+                stats = _compute_stats(days)
+                self._send_json(
+                    200,
+                    {"source": "trades.db + audit_log.jsonl", "from": from_str,
+                     "to": to_str, **stats},
+                )
             elif path in ("/logs", "/audit", "/trades"):
                 from_str = qs.get("from", [""])[0]
                 to_str = qs.get("to", [""])[0]
