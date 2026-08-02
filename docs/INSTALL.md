@@ -116,5 +116,6 @@ bot-cli bot-logs          # Logs bot Python
 bot-cli restart           # Reinicio rápido
 bot-cli pull-and-restart  # Actualizar código + reinicio
 bot-cli env-edit          # Editar .env con permisos correctos
+bot-cli apply-config      # Recrear contenedor y aplicar puertos/configuración
 bot-cli rebuild-image     # Tras subir nueva imagen al registry
 ```
