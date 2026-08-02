@@ -120,7 +120,7 @@ fi
 # 6. Watcher script
 install -m 755 -D /dev/stdin /usr/local/bin/sync_and_deploy.sh <<SYNC_EOF
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 APP_DIR="$APP_DIR"
@@ -133,7 +133,6 @@ CONTROL_BIND_ADDRESS="$CONTROL_BIND_ADDRESS"
 CONTROL_PORT="$CONTROL_PORT"
 APP_UID=911
 APP_GID=911
-FORCE_RECREATE="\${FORCE_RECREATE:-false}"
 
 fix_perms() {
     chown -R "\${APP_UID}:\${APP_GID}" "\$APP_DIR" 2>/dev/null || true
@@ -143,14 +142,7 @@ fix_perms() {
 }
 
 run_container() {
-    PREVIOUS_CONTAINER="\${CONTAINER_NAME}-previous"
-    HAD_PREVIOUS=false
-    docker rm -fv "\$PREVIOUS_CONTAINER" >/dev/null 2>&1 || true
-    if docker inspect "\$CONTAINER_NAME" >/dev/null 2>&1; then
-        docker stop "\$CONTAINER_NAME" >/dev/null
-        docker rename "\$CONTAINER_NAME" "\$PREVIOUS_CONTAINER"
-        HAD_PREVIOUS=true
-    fi
+    docker rm -f "\$CONTAINER_NAME" >/dev/null 2>&1 || true
     mkdir -p "\$MT5_DATA_DIR" && chown -R "\${APP_UID}:\${APP_GID}" "\$MT5_DATA_DIR"
     if [ -f "\$BOT_CONFIG_DIR/.env" ]; then
         if grep -q '^FOLLOWERBOT_CONTROL_PUBLISH_ADDRESS=' "\$BOT_CONFIG_DIR/.env"; then
@@ -170,7 +162,7 @@ run_container() {
     if [ -n "\$CONTROL_BIND_ADDRESS" ]; then
         CONTROL_PUBLISH=(-p "\${CONTROL_BIND_ADDRESS}:\${CONTROL_PORT}:\${CONTROL_PORT}")
     fi
-    if ! docker run -d \
+    docker run -d \
         --name "\$CONTAINER_NAME" \\
         --restart unless-stopped \\
         -p "\${VNC_PORT}:3000" \\
@@ -178,18 +170,7 @@ run_container() {
         -v "\$APP_DIR:/config/mi_trading_bot" \\
         -v "\$BOT_CONFIG_DIR:/config/bot-data" \\
         -v "\$MT5_DATA_DIR:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes" \\
-        "\$IMAGE"; then
-        echo "[!] No se pudo crear el contenedor nuevo. Restaurando el anterior..."
-        docker rm -fv "\$CONTAINER_NAME" >/dev/null 2>&1 || true
-        if [ "\$HAD_PREVIOUS" = true ]; then
-            docker rename "\$PREVIOUS_CONTAINER" "\$CONTAINER_NAME"
-            docker start "\$CONTAINER_NAME" >/dev/null
-        fi
-        return 1
-    fi
-    if [ "\$HAD_PREVIOUS" = true ]; then
-        docker rm -fv "\$PREVIOUS_CONTAINER" >/dev/null
-    fi
+        "\$IMAGE"
     echo "[OK] Contenedor levantado: \$CONTAINER_NAME"
     if [ -n "\$CONTROL_BIND_ADDRESS" ]; then
         echo "[OK] Control API publicada en \${CONTROL_BIND_ADDRESS}:\${CONTROL_PORT}"
@@ -202,29 +183,21 @@ cd "\$APP_DIR" 2>/dev/null || { echo "[!] \$APP_DIR no existe"; exit 1; }
 [ -d ".git" ] || { echo "[!] Repo no clonado."; exit 0; }
 git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1 || { echo "[!] Sin upstream."; exit 0; }
 
+git fetch origin >/dev/null 2>&1 || { echo "[!] git fetch falló"; exit 1; }
 LOCAL=\$(git rev-parse @)
-REMOTE="\$LOCAL"
-if git fetch origin >/dev/null 2>&1; then
-    REMOTE=\$(git rev-parse @{u})
-else
-    echo "[!] git fetch falló; continuando con el código local para recuperar el servicio."
-fi
+REMOTE=\$(git rev-parse @{u})
 
 if [ "\$LOCAL" != "\$REMOTE" ]; then
     echo "[+] Cambios detectados, pull..."
     if git pull --ff-only; then
         fix_perms
-        if [ "\$FORCE_RECREATE" = true ]; then
-            run_container
-        else
-            docker restart "\$CONTAINER_NAME" >/dev/null 2>&1 || run_container
-        fi
+        docker restart "\$CONTAINER_NAME" >/dev/null 2>&1 || run_container
     else
         echo "[!] git pull falló"; exit 1
     fi
 else
     fix_perms
-    if [ "\$FORCE_RECREATE" = true ] || [ -z "\$(docker ps -q -f name=^\${CONTAINER_NAME}\$)" ]; then
+    if [ -z "\$(docker ps -q -f name=^\${CONTAINER_NAME}\$)" ]; then
         run_container
     fi
 fi
