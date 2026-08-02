@@ -25,7 +25,6 @@ Comandos:
   vnc                 Imprime URL de VNC y la abre si hay xdg-open
   env-edit            Edita /opt/bot-config/.env
   env-show            Muestra .env (enmascara passwords)
-    apply-config        Recrea el contenedor y aplica puertos/configuración
   rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
   shell               Shell bash dentro del contenedor como abc
   rootshell           Shell bash dentro del contenedor como root
@@ -48,13 +47,6 @@ case "$cmd" in
         echo "=== Estado del bot ==="
         if [ -f "$BOT_CONFIG_DIR/.env" ]; then
             echo ".env: presente ($(stat -c '%U:%G %a' "$BOT_CONFIG_DIR/.env"))"
-            CONTROL_PUBLISH_ADDRESS=$(sed -n 's/^FOLLOWERBOT_CONTROL_PUBLISH_ADDRESS=//p' "$BOT_CONFIG_DIR/.env" | tail -n 1 | tr -d '\r')
-            CONTROL_PORT=$(sed -n 's/^FOLLOWERBOT_CONTROL_PORT=//p' "$BOT_CONFIG_DIR/.env" | tail -n 1 | tr -d '\r')
-            if [ -n "$CONTROL_PUBLISH_ADDRESS" ]; then
-                echo "Control API: publicada en ${CONTROL_PUBLISH_ADDRESS}:${CONTROL_PORT:-8787}"
-            else
-                echo "Control API: no publicada"
-            fi
         else
             echo ".env: FALTA"
         fi
@@ -139,24 +131,17 @@ case "$cmd" in
         ${EDITOR:-nano} "$BOT_CONFIG_DIR/.env"
         chown 911:911 "$BOT_CONFIG_DIR/.env"
         chmod 640 "$BOT_CONFIG_DIR/.env"
-        echo "[*] Para aplicar cambios, incluidos puertos: bot-cli apply-config"
+        echo "[*] Para aplicar cambios: bot-cli restart"
         ;;
 
     env-show)
         if [ -f "$BOT_CONFIG_DIR/.env" ]; then
             # Enmascara líneas con PASSWORD, HASH, TOKEN, API_ID o cualquier valor sensible
-            sed -E 's/(PASSWORD|HASH|TOKEN|API_ID|API_HASH|API_KEY)=.*/\1=***MASKED***/' "$BOT_CONFIG_DIR/.env"
+            sed -E 's/(PASSWORD|HASH|TOKEN|API_ID|API_HASH)=.*/\1=***MASKED***/' "$BOT_CONFIG_DIR/.env"
         else
             echo "$BOT_CONFIG_DIR/.env no existe."
             exit 1
         fi
-        ;;
-
-    apply-config)
-        echo "[*] Recreando $CONTAINER_NAME para aplicar la configuración..."
-        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-        /usr/local/bin/sync_and_deploy.sh
-        echo "[OK] Configuración aplicada. Comprueba con: bot-cli status"
         ;;
 
     rebuild-image)

@@ -17,10 +17,6 @@ BOT_CONFIG_DIR="${BOT_CONFIG_DIR:-/opt/bot-config}"
 MT5_DATA_DIR="${MT5_DATA_DIR:-/opt/mt5-data}"
 CONTAINER_NAME="${CONTAINER_NAME:-followerbot}"
 VNC_PORT="${VNC_PORT:-3000}"
-# Empty means the control API is not published by Docker. When enabled, expose
-# it only on a private interface; put TLS/authenticated ingress in front of it.
-CONTROL_BIND_ADDRESS="${CONTROL_BIND_ADDRESS:-}"
-CONTROL_PORT="${CONTROL_PORT:-8787}"
 LOG_FILE="${LOG_FILE:-/var/log/followerbot-sync.log}"
 REGISTRY="${REGISTRY:-}"      # ej. "registry.lan:5000" — vacío = build local
 IMAGE_TAG="${IMAGE_TAG:-followerbot:latest}"
@@ -129,8 +125,6 @@ MT5_DATA_DIR="$MT5_DATA_DIR"
 CONTAINER_NAME="$CONTAINER_NAME"
 IMAGE="$FULL_IMAGE"
 VNC_PORT="$VNC_PORT"
-CONTROL_BIND_ADDRESS="$CONTROL_BIND_ADDRESS"
-CONTROL_PORT="$CONTROL_PORT"
 APP_UID=911
 APP_GID=911
 
@@ -144,39 +138,15 @@ fix_perms() {
 run_container() {
     docker rm -f "\$CONTAINER_NAME" >/dev/null 2>&1 || true
     mkdir -p "\$MT5_DATA_DIR" && chown -R "\${APP_UID}:\${APP_GID}" "\$MT5_DATA_DIR"
-    if [ -f "\$BOT_CONFIG_DIR/.env" ]; then
-        if grep -q '^FOLLOWERBOT_CONTROL_PUBLISH_ADDRESS=' "\$BOT_CONFIG_DIR/.env"; then
-            CONTROL_BIND_ADDRESS=\$(sed -n 's/^FOLLOWERBOT_CONTROL_PUBLISH_ADDRESS=//p' "\$BOT_CONFIG_DIR/.env" | tail -n 1 | tr -d '\r')
-        fi
-        if grep -q '^FOLLOWERBOT_CONTROL_PORT=' "\$BOT_CONFIG_DIR/.env"; then
-            CONFIGURED_CONTROL_PORT=\$(sed -n 's/^FOLLOWERBOT_CONTROL_PORT=//p' "\$BOT_CONFIG_DIR/.env" | tail -n 1 | tr -d '\r')
-            if [[ "\$CONFIGURED_CONTROL_PORT" =~ ^[0-9]+$ ]]; then
-                CONTROL_PORT="\$CONFIGURED_CONTROL_PORT"
-            else
-                echo "[!] FOLLOWERBOT_CONTROL_PORT debe ser numérico."
-                exit 1
-            fi
-        fi
-    fi
-    CONTROL_PUBLISH=()
-    if [ -n "\$CONTROL_BIND_ADDRESS" ]; then
-        CONTROL_PUBLISH=(-p "\${CONTROL_BIND_ADDRESS}:\${CONTROL_PORT}:\${CONTROL_PORT}")
-    fi
-    docker run -d \
+    docker run -d \\
         --name "\$CONTAINER_NAME" \\
         --restart unless-stopped \\
         -p "\${VNC_PORT}:3000" \\
-        "\${CONTROL_PUBLISH[@]}" \
         -v "\$APP_DIR:/config/mi_trading_bot" \\
         -v "\$BOT_CONFIG_DIR:/config/bot-data" \\
         -v "\$MT5_DATA_DIR:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes" \\
         "\$IMAGE"
     echo "[OK] Contenedor levantado: \$CONTAINER_NAME"
-    if [ -n "\$CONTROL_BIND_ADDRESS" ]; then
-        echo "[OK] Control API publicada en \${CONTROL_BIND_ADDRESS}:\${CONTROL_PORT}"
-    else
-        echo "[*] Control API no publicada (FOLLOWERBOT_CONTROL_PUBLISH_ADDRESS vacío)."
-    fi
 }
 
 cd "\$APP_DIR" 2>/dev/null || { echo "[!] \$APP_DIR no existe"; exit 1; }

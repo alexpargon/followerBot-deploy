@@ -14,8 +14,6 @@ Infraestructura de despliegue para [followerBot](https://github.com/alexpargon/f
 - **`docs/MIGRATION.md`** — Cómo migrar de versiones antiguas.
 - **`docs/LOG_SERVER.md`** — Servicio HTTP opt-in de solo lectura para consultar logs/trades por día (pensado para un LXC de dev/demo).
 - **`docs/ANALYSIS.md`** — Cómo usar `/stats` (mismo log server) para revisar rendimiento y detectar discrepancias antes de promover `develop` a `master`.
-- **`docs/CONTROL_API.md`** — Control móvil opt-in, autenticación, red privada y semántica de suspensión.
-- **`docs/CONFIGURATION.md`** — Inventario de parámetros y propiedad móvil, reinicio o despliegue.
 
 ## Quick start
 

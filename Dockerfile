@@ -117,8 +117,6 @@ ENV BOT_DATA_DIR=/config/bot-data \
   BOT_CODE_DIR=/config/mi_trading_bot \
   BOT_PYTHON='C:\Python311\python.exe'
 
-EXPOSE 8787
-
 # ---------------------------------------------------------------------------
 # 12. Directorio de estado
 # ---------------------------------------------------------------------------
