@@ -142,6 +142,7 @@ run_container() {
         --name "\$CONTAINER_NAME" \\
         --restart unless-stopped \\
         -p "\${VNC_PORT}:3000" \\
+        -p "8787:8787" \
         -v "\$APP_DIR:/config/mi_trading_bot" \\
         -v "\$BOT_CONFIG_DIR:/config/bot-data" \\
         -v "\$MT5_DATA_DIR:/config/.wine/drive_c/users/abc/AppData/Roaming/MetaQuotes" \\
