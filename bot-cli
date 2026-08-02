@@ -26,6 +26,7 @@ Comandos:
   env-edit            Edita /opt/bot-config/.env
   env-show            Muestra .env (enmascara passwords)
     apply-config        Recrea el contenedor y aplica puertos/configuración
+    cleanup-volumes     Elimina volúmenes Docker anónimos sin uso
   rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
   shell               Shell bash dentro del contenedor como abc
   rootshell           Shell bash dentro del contenedor como root
@@ -154,9 +155,14 @@ case "$cmd" in
 
     apply-config)
         echo "[*] Recreando $CONTAINER_NAME para aplicar la configuración..."
-        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-        /usr/local/bin/sync_and_deploy.sh
+        FORCE_RECREATE=true /usr/local/bin/sync_and_deploy.sh
         echo "[OK] Configuración aplicada. Comprueba con: bot-cli status"
+        ;;
+
+    cleanup-volumes)
+        echo "[*] Eliminando únicamente volúmenes Docker anónimos sin uso..."
+        docker volume prune -f
+        echo "[OK] Limpieza terminada. Comprueba espacio con: docker system df"
         ;;
 
     rebuild-image)

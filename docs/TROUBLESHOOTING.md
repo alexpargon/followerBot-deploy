@@ -14,6 +14,8 @@ Todas las operaciones comunes se hacen con `bot-cli`. Ejecuta `bot-cli help` par
 | `bot-cli telegram-login` | Login interactivo de Telethon (primera vez) |
 | `bot-cli env-edit` | Editar `/opt/bot-config/.env` con permisos correctos |
 | `bot-cli env-show` | Ver `.env` con passwords enmascaradas |
+| `bot-cli apply-config` | Recrear el contenedor y aplicar puertos/configuración |
+| `bot-cli cleanup-volumes` | Eliminar volúmenes Docker anónimos sin uso |
 | `bot-cli vnc` | URL de VNC para login MT5 |
 | `bot-cli rebuild-image` | Pull de nueva imagen + restart |
 | `bot-cli shell` | Shell dentro del contenedor como `abc` |
@@ -29,6 +31,17 @@ pct stop <ID>
 pct resize <ID> rootfs 20G
 pct start <ID>
 ```
+
+Si ocurre al recrear el contenedor, limpia los volúmenes anónimos abandonados
+por recreaciones anteriores y revisa el consumo:
+
+```bash
+bot-cli cleanup-volumes
+docker system df
+```
+
+Los datos persistentes del bot viven en los bind mounts `/opt/bot-config` y
+`/opt/mt5-data`; este comando no elimina esos directorios ni volúmenes nombrados.
 
 ### `wine: /config/.wine is not owned by you`
 
