@@ -25,6 +25,7 @@ Comandos:
   vnc                 Imprime URL de VNC y la abre si hay xdg-open
   env-edit            Edita /opt/bot-config/.env
   env-show            Muestra .env (enmascara passwords)
+  install-ea          Instala TraderControlEA (calendario nativo MT5) en el terminal
   rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
   shell               Shell bash dentro del contenedor como abc
   rootshell           Shell bash dentro del contenedor como root
@@ -166,6 +167,11 @@ case "$cmd" in
 
     rootshell)
         docker exec -it "$CONTAINER_NAME" bash
+        ;;
+
+    install-ea)
+        DEPLOY_DIR="${DEPLOY_DIR:-/opt/followerbot-deploy}"
+        exec "$DEPLOY_DIR/scripts/install-trader-control-ea.sh"
         ;;
 
     help|--help|-h)

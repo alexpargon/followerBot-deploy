@@ -14,6 +14,7 @@ Infraestructura de despliegue para [followerBot](https://github.com/alexpargon/f
 - **`docs/MIGRATION.md`** — Cómo migrar de versiones antiguas.
 - **`docs/LOG_SERVER.md`** — Servicio HTTP opt-in de solo lectura para consultar logs/trades por día (pensado para un LXC de dev/demo).
 - **`docs/ANALYSIS.md`** — Cómo usar `/stats` (mismo log server) para revisar rendimiento y detectar discrepancias antes de promover `develop` a `master`.
+- **`docs/TRADER_CONTROL_EA.md`** — Ejecutar TraderControlEA (calendario nativo MT5) en el terminal del followerbot.
 
 ## Quick start
 
