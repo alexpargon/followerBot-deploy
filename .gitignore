@@ -8,3 +8,4 @@ __pycache__/
 # MQL5 SOURCE must NEVER be committed to this public repo — only compiled .ex5.
 *.mq5
 *.mqh
+.DS_Store
