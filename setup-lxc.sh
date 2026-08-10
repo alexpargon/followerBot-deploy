@@ -175,24 +175,11 @@ fi
 SYNC_EOF
 
 # 7. Watchdog script
-install -m 755 -D /dev/stdin /usr/local/bin/watchdog.sh <<WD_EOF
-#!/bin/bash
-set -uo pipefail
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-CONTAINER_NAME="$CONTAINER_NAME"
-
-if [ -z "\$(docker ps -q -f name=^\${CONTAINER_NAME}\$)" ]; then
-    echo "[\$(date -Iseconds)] Contenedor no running. Delegando..."
-    /usr/local/bin/sync_and_deploy.sh
-    exit 0
-fi
-
-if ! docker exec "\$CONTAINER_NAME" pgrep -f "main.py" >/dev/null 2>&1; then
-    echo "[\$(date -Iseconds)] main.py no vivo. Restart..."
-    docker restart "\$CONTAINER_NAME"
-fi
-WD_EOF
+# Enlazado (no copiado) al del repo: así un 'git pull' lo actualiza de verdad.
+# Antes era un heredoc duplicado aquí, y el fichero scripts/watchdog.sh del repo
+# nunca llegaba a ejecutarse — los arreglos se perdían silenciosamente.
+ln -sfn "$DEPLOY_DIR/scripts/watchdog.sh" /usr/local/bin/watchdog.sh
+chmod 755 "$DEPLOY_DIR/scripts/watchdog.sh"
 
 # 8. Crontab
 (
@@ -204,8 +191,10 @@ WD_EOF
 systemctl enable --now cron >/dev/null 2>&1 || service cron start
 
 # 9. bot-cli
-install -m 755 "$DEPLOY_DIR/bot-cli" /usr/local/bin/bot-cli
-echo "[*] bot-cli instalado. Usa 'bot-cli help' para ver comandos."
+# Enlazado, no copiado: 'git pull' en $DEPLOY_DIR basta para actualizarlo.
+ln -sfn "$DEPLOY_DIR/bot-cli" /usr/local/bin/bot-cli
+chmod 755 "$DEPLOY_DIR/bot-cli"
+echo "[*] bot-cli enlazado. Usa 'bot-cli help' para ver comandos."
 
 # 10. Clone del repo del bot (necesita deploy key en GitHub)
 LXC_IP=$(hostname -I | awk '{print $1}')

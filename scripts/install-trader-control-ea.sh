@@ -132,10 +132,13 @@ docker exec "$CONTAINER_NAME" sh -c \
 #
 # Symbol must exist on this broker (VT Markets uses suffixes like XAUUSD-VIPc),
 # so default to whatever the terminal last had selected.
+# NOTE: MT5 writes its .ini files as UTF-16LE, so plain sed/grep find nothing.
 EA_SYMBOL=$(get_env TRADERCONTROL_EA_SYMBOL)
 if [ -z "$EA_SYMBOL" ]; then
     EA_SYMBOL=$(docker exec "$CONTAINER_NAME" sh -c \
-        'sed -n "s/^SymbolLast=//p" "/config/.wine/drive_c/Program Files/MetaTrader 5/Config/common.ini" 2>/dev/null | tail -n 1' | tr -d '\r')
+        'f="/config/.wine/drive_c/Program Files/MetaTrader 5/Config/common.ini"; \
+         { iconv -f UTF-16LE -t UTF-8 "$f" 2>/dev/null || cat "$f" 2>/dev/null; } \
+         | sed -n "s/^SymbolLast=//p" | tail -n 1' | tr -d '\r')
 fi
 [ -z "$EA_SYMBOL" ] && EA_SYMBOL="EURUSD"
 log "Startup chart symbol: $EA_SYMBOL"

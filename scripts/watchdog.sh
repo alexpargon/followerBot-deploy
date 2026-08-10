@@ -38,8 +38,8 @@ case "$(printf '%s' "$ea_enabled" | tr '[:upper:]' '[:lower:]')" in
 esac
 
 hb_epoch=$(docker exec "$CONTAINER_NAME" sh -c \
-    'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -printf "%T@\n" 2>/dev/null | sort -n | tail -n 1' \
-    | cut -d. -f1)
+    'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -exec stat -c "%Y" {} \; 2>/dev/null | sort -n | tail -n 1' \
+    | tr -d '\r')
 
 [ -z "$hb_epoch" ] && exit 0   # EA aún no instalado/registrado: nada que vigilar
 

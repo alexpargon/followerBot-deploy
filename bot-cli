@@ -189,7 +189,7 @@ case "$cmd" in
         echo
         echo "=== Heartbeat del EA (se reescribe en cada push, ~15s) ==="
         hb=$(docker exec -u abc "$CONTAINER_NAME" sh -c \
-            'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -printf "%T@ %p\n" 2>/dev/null | sort -n | tail -n 1')
+            'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -exec stat -c "%Y %n" {} \; 2>/dev/null | sort -n | tail -n 1')
         if [ -z "$hb" ]; then
             echo "SIN heartbeat: el EA nunca se ha registrado. Ejecuta: bot-cli install-ea && bot-cli restart"
             exit 1
