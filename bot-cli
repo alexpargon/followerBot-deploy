@@ -26,6 +26,7 @@ Comandos:
   env-edit            Edita /opt/bot-config/.env
   env-show            Muestra .env (enmascara passwords)
   install-ea          Instala TraderControlEA (calendario nativo MT5) en el terminal
+  ea-status           Comprueba si TraderControlEA está adjunto y empujando
   rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
   shell               Shell bash dentro del contenedor como abc
   rootshell           Shell bash dentro del contenedor como root
@@ -172,6 +173,45 @@ case "$cmd" in
     install-ea)
         DEPLOY_DIR="${DEPLOY_DIR:-/opt/followerbot-deploy}"
         exec "$DEPLOY_DIR/scripts/install-trader-control-ea.sh"
+        ;;
+
+    ea-status)
+        MT5_DIR="/config/.wine/drive_c/Program Files/MetaTrader 5"
+
+        echo "=== Ficheros instalados ==="
+        docker exec -u abc "$CONTAINER_NAME" sh -c \
+            "ls -la '$MT5_DIR/MQL5/Experts/TraderControlEA.ex5' \
+                    '$MT5_DIR/MQL5/Presets/TraderControlEA.set' \
+                    /config/.wine/drive_c/mt5-startup.ini 2>&1"
+        echo
+        echo "=== Terminal MT5 ==="
+        docker exec "$CONTAINER_NAME" pgrep -af terminal64.exe || echo "terminal64.exe NO está corriendo"
+        echo
+        echo "=== Heartbeat del EA (se reescribe en cada push, ~15s) ==="
+        hb=$(docker exec -u abc "$CONTAINER_NAME" sh -c \
+            'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -printf "%T@ %p\n" 2>/dev/null | sort -n | tail -n 1')
+        if [ -z "$hb" ]; then
+            echo "SIN heartbeat: el EA nunca se ha registrado. Ejecuta: bot-cli install-ea && bot-cli restart"
+            exit 1
+        fi
+        hb_epoch=${hb%% *}
+        hb_path=${hb#* }
+        age=$(( $(date +%s) - ${hb_epoch%.*} ))
+        echo "fichero: $hb_path"
+        echo "edad:    ${age}s"
+        docker exec -u abc "$CONTAINER_NAME" cat "$hb_path" 2>/dev/null
+        echo
+        if [ "$age" -le 60 ]; then
+            echo "[OK] El EA está empujando."
+        else
+            echo "[!] El EA NO está empujando (heartbeat viejo)."
+            echo "    Revisa el log de Experts abajo; si está vacío, el EA no está adjunto."
+        fi
+        echo
+        echo "=== Log de Experts (últimas líneas) ==="
+        docker exec -u abc "$CONTAINER_NAME" sh -c \
+            "cd '$MT5_DIR/MQL5/Logs' 2>/dev/null && iconv -f UTF-16LE -t UTF-8 \"\$(ls -t *.log | head -1)\" 2>/dev/null | tail -25" \
+            || echo "(sin MQL5/Logs — ningún Expert ha escrito nunca en este terminal)"
         ;;
 
     help|--help|-h)

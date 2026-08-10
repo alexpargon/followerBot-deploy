@@ -35,14 +35,37 @@ fi
 # Asegurar que el terminal MT5 está corriendo en Wine.
 # La imagen base intenta iniciarlo con ShellExecuteEx pero falla en algunos
 # entornos (Wine devuelve "File not found" para asociaciones .exe).
-# Lo lanzamos directamente si no hay proceso terminal64 activo.
+#
+# Además: si existe el startup .ini de TraderControlEA hay que relanzar el
+# terminal con /config: aunque la imagen base ya lo haya arrancado, porque la
+# base lo lanza SIN configuración y entonces el EA no se adjunta. MT5 sólo
+# persiste los perfiles de gráfico en un cierre limpio, y este contenedor se
+# mata a lo bruto (s6-svwait timeout), así que el adjuntado manual se pierde
+# en cada reinicio. El .ini lo vuelve a adjuntar en cada arranque.
 # ---------------------------------------------------------------------------
+MT5_STARTUP_INI="/config/.wine/drive_c/mt5-startup.ini"
+MT5_ARGS=""
+if [ -f "$MT5_STARTUP_INI" ]; then
+    MT5_ARGS='/config:C:\mt5-startup.ini'
+    if pgrep -f "terminal64.exe" >/dev/null 2>&1; then
+        echo "[s6] Startup .ini presente — relanzando MT5 con configuración..."
+        pkill -TERM -f "terminal64.exe" 2>/dev/null || true
+        WAITED=0
+        while pgrep -f "terminal64.exe" >/dev/null 2>&1 && [ "$WAITED" -lt 20 ]; do
+            sleep 1
+            WAITED=$((WAITED + 1))
+        done
+        pkill -KILL -f "terminal64.exe" 2>/dev/null || true
+        sleep 2
+    fi
+fi
+
 if ! pgrep -f "terminal64.exe" >/dev/null 2>&1; then
-    echo "[s6] Terminal MT5 no está corriendo — iniciando terminal64.exe..."
+    echo "[s6] Iniciando terminal64.exe ${MT5_ARGS:-(sin configuración)}..."
     s6-setuidgid abc \
         env HOME=/config WINEPREFIX=/config/.wine WINEDEBUG=-all \
             XDG_RUNTIME_DIR=/tmp/runtime-abc DISPLAY=:0 \
-        wine "$MT5_EXE" &
+        wine "$MT5_EXE" $MT5_ARGS &
     # Dar tiempo al terminal para cargar antes de que el bot intente conectar.
     # mt5_connection.py también reintenta, así que 30s es suficiente margen inicial.
     sleep 30

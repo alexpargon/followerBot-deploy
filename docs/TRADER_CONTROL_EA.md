@@ -17,20 +17,26 @@ blocks it.
 
 ## What is automated vs. one-time manual
 
-Automated (host-side, no compile, no `docker exec`, no bot interruption):
+Automated (host-side, no compile, no bot interruption):
 
 - Installing the compiled EA into the terminal's `MQL5/Experts/`.
 - Generating the preset (`MQL5/Presets/TraderControlEA.set`) with the server
   URL and API key from `.env`.
+- Generating `C:\mt5-startup.ini`, which makes MT5 **re-attach the EA on every
+  terminal launch**. `s6/followerbot/run` passes it via `/config:`.
 
-One-time manual (via VNC — persists afterwards in the bind-mounted profile):
+One-time manual (via VNC):
 
-- Allowing `WebRequest` to the server URL.
-- Attaching the EA to a chart (loading the preset) and enabling Algo Trading.
+- Allowing `WebRequest` to the server URL. This one really is persistent: MT5
+  writes it to `Config/common.ini` when you close the Options dialog.
 
-MT5 cannot auto-attach an EA headlessly, but once attached and saved it is
-restored on every restart because the terminal profile lives under the
-bind-mounted data folder.
+> **Do not rely on attaching the EA by hand.** MT5 only writes chart profiles
+> (`Profiles/Charts/<profile>/*.chr`) during a *graceful* shutdown. This
+> container is hard-killed — `docker logs` shows `s6-svwait: fatal: timed out`
+> — so a hand-attached EA is silently lost on the next restart, and MT5
+> auto-updates itself (build 6090 arrived within days of install) which forces
+> exactly such a restart. That is why the EA "worked for a day or two and then
+> stopped". The startup `.ini` is what makes it survive.
 
 ## Steps
 
@@ -45,28 +51,42 @@ bind-mounted data folder.
    TRADERCONTROL_EA_ENABLED=true
    TRADERCONTROL_EA_URL=https://tradedata.your-domain.com
    TRADERCONTROL_EA_KEY=<the X-API-Key for TraderControlServer>
+   # Optional. Defaults to the terminal's last selected symbol, then EURUSD.
+   # Set it if your broker uses suffixes (e.g. XAUUSD-VIPc) and the default
+   # chart fails to open — no chart means no EA.
+   TRADERCONTROL_EA_SYMBOL=
    ```
 
 3. Make sure the container has started at least once (MT5 must have created its
-   `Terminal/<hash>/MQL5` folder), then install:
+   `MQL5` folder), then install and apply:
 
    ```bash
    bot-cli install-ea
+   bot-cli restart
    ```
 
-   This copies the EA and writes the preset, then prints the remaining manual
-   steps.
-
-4. One-time in MT5 (VNC, `http://<lxc-ip>:3000`):
+4. One-time in MT5 (VNC, `http://<lxc-ip>:3000`), only if not already done:
    - Tools → Options → Expert Advisors → **Allow WebRequest for listed URL** →
      add `TRADERCONTROL_EA_URL`.
-   - Drag **TraderControlEA** onto any chart → in the dialog **Load** the
-     `TraderControlEA` preset → tick **Allow Algo Trading** → OK.
-   - Confirm the **AutoTrading** toolbar button is green.
 
-5. Verify: the EA prints `TraderControlEA: Initialized` in the Experts tab and
-   `Calendar cursor initialized` shortly after, and TraderControlServer starts
-   receiving calendar updates.
+5. Verify:
+
+   ```bash
+   bot-cli ea-status
+   ```
+
+   Expect `[OK] El EA está empujando` with a heartbeat age under ~60 s, plus
+   `TraderControlEA: Initialized` and `Calendar cursor initialized` in the
+   Experts log.
+
+## Monitoring
+
+The EA rewrites `Common/Files/TraderControlEA_<login>.dat` on every successful
+push (~15 s), so its mtime is an exact liveness probe. `scripts/watchdog.sh`
+checks it every 15 min and restarts the container if it goes stale for more
+than `EA_STALE_AFTER` (300 s), rate-limited by `EA_COOLDOWN` (1 h) so a
+TraderControlServer outage — which also stalls the heartbeat — cannot cause a
+restart loop.
 
 ## Notes
 
