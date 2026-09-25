@@ -1,0 +1,48 @@
+name: lint
+
+# Cheap guard for a public infra repo: every shell script must parse and pass
+# shellcheck (severity=error to start; tighten later), Python must compile,
+# and no secret-looking files may be committed (*.mq5/.mqh are blocked by
+# .gitignore; this double-checks).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash syntax check (all shell)
+        run: |
+          set -e
+          fail=0
+          for f in bot-cli setup-lxc.sh setup-registry.sh \
+                   scripts/*.sh s6/followerbot/run s6/followerbot/finish; do
+            [ -f "$f" ] || continue
+            if bash -n "$f"; then echo "OK   $f"; else echo "FAIL $f"; fail=1; fi
+          done
+          exit $fail
+
+      - name: shellcheck (errors only)
+        run: |
+          fail=0
+          for f in bot-cli setup-lxc.sh setup-registry.sh \
+                   scripts/*.sh s6/followerbot/run s6/followerbot/finish; do
+            [ -f "$f" ] || continue
+            if shellcheck --severity=error "$f"; then echo "OK   $f"; else echo "FAIL $f"; fail=1; fi
+          done
+          exit $fail
+
+      - name: python compile check
+        run: python3 -m py_compile scripts/log_server.py
+
+      - name: no MQL source committed (public repo rule)
+        run: |
+          if find . -path ./.git -prune -o \( -name '*.mq5' -o -name '*.mqh' \) -print | grep -q .; then
+            echo '::error::MQL5 source must never be committed to this public repo'
+            exit 1
+          fi

@@ -27,6 +27,8 @@ Comandos:
   env-show            Muestra .env (enmascara passwords)
   install-ea          Instala TraderControlEA (calendario nativo MT5) en el terminal
   ea-status           Comprueba si TraderControlEA está adjunto y empujando
+  doctor              Diagnóstico read-only de una pasada (contenedor, git, EA,
+                      heartbeat, errores recientes, disco). Exit!=0 si algo falla.
   rebuild-image       Pull de imagen y restart (tras nueva versión en el registry)
   shell               Shell bash dentro del contenedor como abc
   rootshell           Shell bash dentro del contenedor como root
@@ -212,6 +214,72 @@ case "$cmd" in
         docker exec -u abc "$CONTAINER_NAME" sh -c \
             "cd '$MT5_DIR/MQL5/Logs' 2>/dev/null && iconv -f UTF-16LE -t UTF-8 \"\$(ls -t *.log | head -1)\" 2>/dev/null | tail -25" \
             || echo "(sin MQL5/Logs — ningún Expert ha escrito nunca en este terminal)"
+        ;;
+
+    doctor)
+        # Diagnóstico read-only. No toca nada. Exit 1 si hay fallos.
+        FAIL=0
+        warn() { echo "  [!] $*"; }
+        fail() { echo "  [X] $*"; FAIL=1; }
+        good() { echo "  [OK] $*"; }
+
+        echo "== 1. Contenedor =="
+        cstat=$(docker inspect "$CONTAINER_NAME" --format '{{.State.Status}} restarting={{.State.Restarting}} oom={{.State.OOMKilled}}' 2>/dev/null)
+        if [ -z "$cstat" ]; then fail "contenedor '$CONTAINER_NAME' no existe"
+        elif echo "$cstat" | grep -q 'oom=true'; then fail "última muerte por OOM: $cstat"
+        elif echo "$cstat" | grep -q '^running'; then good "$cstat"
+        else fail "no está corriendo: $cstat"; fi
+
+        echo "== 2. Repo =="
+        head_sha=$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null)
+        if [ -z "$head_sha" ]; then fail "repo no clonado o ilegible en $APP_DIR"
+        else
+            good "HEAD ${head_sha}: $(git -C "$APP_DIR" log -1 --format=%s 2>/dev/null)"
+            br=$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)
+            ahead=$(git -C "$APP_DIR" rev-list --count "HEAD..@{u}" 2>/dev/null)
+            if [ -n "$ahead" ] && [ "$ahead" != "0" ]; then warn "$ahead commit(s) sin pull en $br"
+            elif [ -n "$ahead" ]; then good "al día con origin/$br"; fi
+        fi
+
+        echo "== 3. Ficheros de configuración =="
+        [ -f "$BOT_CONFIG_DIR/.env" ] && good ".env" || fail ".env falta"
+        [ -f "$BOT_CONFIG_DIR/session.session" ] && good "session.session" || fail "session.session falta (bot-cli telegram-login)"
+        [ -f "$BOT_CONFIG_DIR/trades.db" ] && good "trades.db" || warn "trades.db aún no existe"
+
+        echo "== 4. Terminal MT5 / EA =="
+        docker exec "$CONTAINER_NAME" pgrep -f terminal64.exe >/dev/null 2>&1 \
+            && good "terminal64.exe corriendo" || fail "terminal64.exe NO corre"
+        hb=$(docker exec -u abc "$CONTAINER_NAME" sh -c \
+            'find /config/.wine/drive_c/users -name "TraderControlEA_*.dat" -exec stat -c "%Y" {} \; 2>/dev/null | sort -n | tail -n 1')
+        if [ -z "$hb" ]; then warn "EA sin heartbeat (¿install-ea? ¿TRADERCONTROL_EA_ENABLED?)"
+        else
+            age=$(( $(date +%s) - ${hb%.*} ))
+            if [ "$age" -le 60 ]; then good "EA heartbeat ${age}s"
+            elif [ "$age" -le 300 ]; then warn "EA heartbeat envejeciendo (${age}s)"
+            else fail "EA heartbeat estancado (${age}s)"; fi
+        fi
+
+        echo "== 5. Errores recientes del bot (últ. 200 líneas) =="
+        if [ -f "$BOT_CONFIG_DIR/bot.log" ]; then
+            errs=$(tail -n 200 "$BOT_CONFIG_DIR/bot.log" | grep -Ec 'ERROR|Traceback|CRITICAL' || true)
+            if [ "${errs:-0}" -gt 0 ]; then warn "${errs} líneas de error en últimas 200"
+            else good "sin errores recientes"; fi
+        else
+            warn "bot.log no existe todavía"
+        fi
+
+        echo "== 6. Disco =="
+        disk_use=$(df -P "$BOT_CONFIG_DIR" 2>/dev/null | awk 'NR==2 {print $5}')
+        case "${disk_use:-}" in
+            ''|*[!0-9%]*) warn "no se pudo leer el uso de disco" ;;
+            *) pct=${disk_use%\%}; if [ "$pct" -ge 90 ]; then fail "disco ${disk_use} lleno"
+               elif [ "$pct" -ge 80 ]; then warn "disco al ${disk_use}"
+               else good "disco ${disk_use}"; fi ;;
+        esac
+
+        echo
+        if [ "$FAIL" -eq 0 ]; then echo "[OK] doctor: sin fallos"; else echo "[X] doctor: hay fallos (arriba con [X])"; fi
+        exit "$FAIL"
         ;;
 
     help|--help|-h)

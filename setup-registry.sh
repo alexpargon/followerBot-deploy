@@ -6,11 +6,27 @@ set -euo pipefail
 REGISTRY_DIR="/opt/registry"
 REGISTRY_PORT="5000"
 AUTH_USER="${1:-}"
-AUTH_PASS="${2:-}"
 
-if [ -z "$AUTH_USER" ] || [ -z "$AUTH_PASS" ]; then
-    echo "Uso: $0 <usuario> <password>"
-    echo "Ejemplo: $0 alex mipasswordseguro"
+# La password NUNCA se pide por argumento de CLI: quedaría visible en el
+# historial de bash y en /proc/<pid>/cmdline. Se lee por stdin (oculta).
+# Alternativa no-interactiva: SETUP_REGISTRY_PASS='...' ./setup-registry.sh alex
+if [ -z "$AUTH_USER" ]; then
+    echo "Uso: $0 <usuario>"
+    echo "    (la password se pide por stdin, o vía SETUP_REGISTRY_PASS)"
+    exit 1
+fi
+
+AUTH_PASS="${SETUP_REGISTRY_PASS:-}"
+if [ -z "$AUTH_PASS" ]; then
+    if [ -t 0 ]; then
+        read -rsp "Password para ${AUTH_USER}: " AUTH_PASS; echo
+    else
+        echo "[!] Sin SETUP_REGISTRY_PASS y sin TTY para pedir la password." >&2
+        exit 1
+    fi
+fi
+if [ -z "$AUTH_PASS" ]; then
+    echo "[!] Password vacía." >&2
     exit 1
 fi
 
@@ -19,9 +35,10 @@ apt-get update -qq && apt-get install -y -qq apache2-utils >/dev/null
 
 mkdir -p "$REGISTRY_DIR"/{auth,data}
 
-# Generar htpasswd
-htpasswd -Bbn "$AUTH_USER" "$AUTH_PASS" > "$REGISTRY_DIR/auth/htpasswd"
+# Generar htpasswd (-i lee la password por stdin; no pasa el secreto por argv)
+printf '%s\n' "$AUTH_PASS" | htpasswd -Bni "$AUTH_USER" > "$REGISTRY_DIR/auth/htpasswd"
 chmod 600 "$REGISTRY_DIR/auth/htpasswd"
+unset AUTH_PASS
 
 # Lanzar registry
 docker rm -f registry 2>/dev/null || true
@@ -59,6 +76,10 @@ PASOS SIGUIENTES:
 
 3. Login desde un cliente:
      docker login ${LXC_IP}:${REGISTRY_PORT} -u ${AUTH_USER}
+
+   NOTA de confianza: el registry sirve HTTP plano (insecure-registries) y
+   auth básica. Aceptable SOLO en LAN de confianza; el secreto de pull de una
+   imagen viaja en claro. No exponer este puerto a WAN ni a redes no confiables.
 
 4. Push:
      docker tag mi-imagen:1.0 ${LXC_IP}:${REGISTRY_PORT}/mi-imagen:1.0

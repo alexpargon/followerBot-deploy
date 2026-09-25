@@ -9,6 +9,9 @@ Infraestructura de despliegue para [followerBot](https://github.com/alexpargon/f
 - **`setup-lxc.sh`** — Configura un LXC de Proxmox para correr el bot.
 - **`s6/`** — Servicio s6 que supervisa el proceso del bot.
 - **`scripts/`** — Watcher git + watchdog del bot.
+- **`bot-cli doctor`** — Diagnóstico read-only de una pasada (contenedor, git,
+  config, terminal/EA heartbeat, errores recientes, disco). Exit != 0 si algo
+  falla: enlazable a cron/monitoreo sin tocar nada.
 - **`docs/INSTALL.md`** — Guía paso a paso de instalación.
 - **`docs/TROUBLESHOOTING.md`** — Errores comunes y soluciones.
 - **`docs/MIGRATION.md`** — Cómo migrar de versiones antiguas.
