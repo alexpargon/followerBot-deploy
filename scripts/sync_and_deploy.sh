@@ -12,6 +12,7 @@ set -uo pipefail
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Un despliegue a la vez (el health gate tarda minutos y cron corre cada 1 min).
+mkdir -p /var/lock 2>/dev/null || true
 exec 9>/var/lock/fb-deploy.lock
 flock -n 9 || exit 0
 
