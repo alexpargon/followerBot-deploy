@@ -5,6 +5,19 @@ set -e
 CODE_DIR="${BOT_CODE_DIR:-/config/mi_trading_bot}"
 DATA_DIR="${BOT_DATA_DIR:-/config/bot-data}"
 PY_WIN="${BOT_PYTHON:-C:\\Python311\\python.exe}"
+HALT=/run/fb-halt
+STARTED=/run/fb-bot-started
+
+# ---------------------------------------------------------------------------
+# Circuit breaker (ver finish): si finish abrió el breaker, NO relanzar.
+# El servicio se queda aquí dormido — sin bot, sin respawn loop — hasta que
+# un humano haga all-clear (docker restart, /run es tmpfs) o el watcher
+# detecte el halt y revierta al último commit sano.
+# ---------------------------------------------------------------------------
+while [ -f "$HALT" ]; do
+    echo "[s6] HALT activo (/run/fb-halt): crash-loop detectado, no se lanza el bot. Esperando intervención humana o rollback del watcher."
+    sleep 60
+done
 
 # Asegurar directorios runtime para Wine
 mkdir -p /tmp/runtime-abc
@@ -75,6 +88,10 @@ else
 fi
 
 echo "[s6] Lanzando followerBot con Python 3.11 embeddable"
+
+# Timestamp de arranque para que finish mida la duración de esta vida
+# (circuit breaker de crash-loops).
+date +%s > "$STARTED"
 
 cd "$CODE_DIR"
 

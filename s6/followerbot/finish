@@ -1,4 +1,74 @@
 #!/usr/bin/with-contenv bash
-# Si el proceso muere, s6 espera 5s y relanza
-echo "[s6] followerbot finished (exit=$1, signal=$2). Restart en 5s..."
+# ---------------------------------------------------------------------------
+# s6 finish — CIRCUIT BREAKER contra crash-loops.
+#
+# Incidente de producción 2026-10-01: una excepción en el capture de cada
+# send_order mató al bot nada más arrancar; s6 lo relanzó 762 veces seguidas
+# (el loop clásico `sleep 5; reintentar`) quemando dinero durante horas con
+# cada respawn. `sleep 5` para siempre NO es protección.
+#
+# Reglas:
+#   * el bot vive < FAST_FAIL s  -> 1 strike
+#   * MAX_STRIKES strikes en WINDOW s -> servicio DOWN (no más respawn) +
+#     /run/fb-halt para que el health-gate del watcher revierta el deploy
+#   * el bot vive >= STABLE_S     -> strikes a cero (estaba sano)
+#
+# All-clear humano: borrar la bandera ->
+#   docker exec followerbot rm -f /run/fb-halt
+# y el run en curso (que espera dormido mientras la bandera existe) relanza.
+# El watcher además revierte al último commit sano si el health-gate lo detecta
+# (ver BAD_COMMIT en sync_and_deploy.sh).
+# ---------------------------------------------------------------------------
+set -u
+
+FAST_FAIL=120      # s: por debajo de esto, una muerte cuenta como crash inmediato
+STABLE_S=300       # s: vivir más que esto resetea los strikes
+WINDOW=600         # s: ventana de conteo de strikes
+MAX_STRIKES=4      # strikes en WINDOW => halt
+
+STRIKES=/run/fb-crashstrikes
+STARTED=/run/fb-bot-started
+HALT=/run/fb-halt
+
+NOW=$(date +%s)
+START=$(cat "$STARTED" 2>/dev/null || echo 0)
+UP=$(( NOW - START ))
+
+# Muerte "larga": no es crash-loop; si fue estable, resetea strikes.
+if [ "$UP" -ge "$STABLE_S" ]; then
+    : > "$STRIKES"
+fi
+
+# Muerte "inmediata": anotar strike (sólo si el bot llegó a arrancar en esta
+# vida — START>0 y coherente).
+if [ "$UP" -lt "$FAST_FAIL" ] && [ "$START" -gt 0 ] && [ "$UP" -ge 0 ]; then
+    echo "$NOW" >> "$STRIKES"
+fi
+
+# Poda: solo strikes dentro de la ventana.
+if [ -s "$STRIKES" ]; then
+    awk -v now="$NOW" -v win="$WINDOW" '($1 >= now - win)' "$STRIKES" > "$STRIKES.tmp" \
+        && mv "$STRIKES.tmp" "$STRIKES"
+fi
+STRIKE_COUNT=$(wc -l < "$STRIKES" 2>/dev/null || echo 0)
+
+echo "[s6] followerbot finished (exit=$1, signal=$2, vivió ${UP}s, strikes=${STRIKE_COUNT}/${MAX_STRIKES} en ${WINDOW}s)."
+
+if [ "$STRIKE_COUNT" -ge "$MAX_STRIKES" ]; then
+    echo "[s6] !!! CIRCUIT BREAKER ABIERTO: ${STRIKE_COUNT} crashes en <${WINDOW}s."
+    echo "[s6] !!! No se relanza el bot. Requiere intervención humana."
+    echo "[s6] !!! 1) Ver logs: docker logs --tail 200 followerbot"
+    echo "[s6] !!! 2) El watcher revertirá el deploy si el health-gate lo detecta."
+    echo "[s6] !!! 3) All-clear manual tras arreglar: docker exec followerbot rm -f /run/fb-halt"
+    touch "$HALT"
+    # Alerta opcional (si el contenedor tiene la URL del log-server + curl).
+    if [ -n "${LOG_SERVER_ALERT_URL:-}" ] && command -v curl >/dev/null 2>&1; then
+        curl -m 5 -s -o /dev/null "${LOG_SERVER_ALERT_URL}" || true
+    fi
+    # NO hay respawn del bot: el próximo run verá /run/fb-halt y se quedará
+    # esperando sin lanzar nada (guarda al inicio de run). No usamos
+    # s6-svctl -d para que el all-clear sea solo borrar la bandera.
+    exit 0
+fi
+
 sleep 5
